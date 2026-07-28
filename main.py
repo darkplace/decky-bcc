@@ -12,6 +12,9 @@ from armada_control.config import build_config
 from armada_control.controller import set_controller_type
 from armada_control.cpu_limit import get_state as cpu_limit_state
 from armada_control.cpu_limit import save_state as save_cpu_limit
+from armada_control.emulation import get_state as emulation_state
+from armada_control.emulation import managed_appids as emulation_managed_appids
+from armada_control.emulation import set_game_setting as set_emulation_game_setting
 from armada_control.fan_control import get_state as fan_control_state
 from armada_control.fan_control import save_state as save_fan_control
 from armada_control.joystick_led import save_state as save_joystick_led
@@ -101,3 +104,12 @@ class Plugin:
 
     async def set_lsfg_game_enabled(self, appid, enabled):
         return await asyncio.to_thread(set_lsfg_game_enabled, appid, enabled)
+
+    async def get_emulation_managed_appids(self):
+        return await asyncio.to_thread(emulation_managed_appids)
+
+    async def get_emulation_state(self, appid, emulator="", core=""):
+        return await asyncio.to_thread(emulation_state, appid, emulator, core)
+
+    async def set_emulation_game_setting(self, appid, setting, value=None):
+        return await asyncio.to_thread(set_emulation_game_setting, appid, setting, value)

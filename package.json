@@ -1,6 +1,6 @@
 {
   "name": "armada-control",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "description": "Batocera-native Decky controls for ARM and x86 handhelds",
   "author": "suckbluefrog <suckbluefrog@proton.me>",
   "license": "GPL-2.0-or-later",
@@ -21,5 +21,9 @@
     "rollup": "4.62.0",
     "shx": "0.4.0",
     "typescript": "6.0.3"
+  },
+  "overrides": {
+    "@rollup/plugin-commonjs": "29.0.3",
+    "rollup-plugin-delete": "3.0.2"
   }
 }

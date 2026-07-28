@@ -13,6 +13,11 @@ printf '{"name":"legacy"}\n' > "$TEST_ROOT/system/homebrew/plugins/decky-lsfg-vk
 
 BATOCERA_USERDATA="$TEST_ROOT" bash "$ROOT/install.sh" --no-restart
 test -s "$TEST_ROOT/system/homebrew/plugins/armada-control/dist/index.js"
+test -s "$TEST_ROOT/system/homebrew/plugins/armada-control/PAYLOAD.sha256"
+(
+    cd "$TEST_ROOT/system/homebrew/plugins/armada-control"
+    sha256sum -c PAYLOAD.sha256 >/dev/null
+)
 test -x "$TEST_ROOT/system/bin/batocera-control-game-launch"
 test -x "$TEST_ROOT/system/bin/batocera-control-lsfg-launch"
 test -x "$TEST_ROOT/system/services/batocera_control_paddles"

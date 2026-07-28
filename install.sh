@@ -31,6 +31,10 @@ for required in plugin.json main.py dist/index.js py_modules/armada_control/conf
         exit 1
     fi
 done
+if [ ! -s "${ROOT}/dist/index.js" ]; then
+    echo "Batocera Control payload is incomplete: dist/index.js is empty" >&2
+    exit 1
+fi
 
 if [ ! -x "$PLUGIN_LOADER" ]; then
     echo "Decky PluginLoader is not installed; install Decky from Steam Tools first" >&2
@@ -60,12 +64,20 @@ mkdir -p "$STAGE"
 cp -a "${ROOT}/dist" "${ROOT}/py_modules" "$STAGE/"
 cp -a "${ROOT}/main.py" "${ROOT}/plugin.json" "${ROOT}/package.json" \
     "${ROOT}/VERSION" "${ROOT}/SOURCE.json" "${ROOT}/LICENSE.md" \
-    "${ROOT}/THIRD_PARTY_NOTICES.md" "$STAGE/"
+    "${ROOT}/THIRD_PARTY_NOTICES.md" "${ROOT}/PAYLOAD.sha256" "$STAGE/"
 find "$STAGE" -type d -exec chmod 0755 {} +
 find "$STAGE" -type f -exec chmod 0644 {} +
 chmod 0755 "$STAGE/py_modules/batocera-control-game-launch" \
     "$STAGE/py_modules/batocera-control-lsfg-launch" \
     "$STAGE/py_modules/batocera-control-paddles-service"
+
+# Verify the exact staged tree, not only the source archive. A truncated Decky
+# frontend can leave GamepadUI unusable even though the Python backend starts.
+(
+    cd "$STAGE"
+    sha256sum -c PAYLOAD.sha256
+)
+sync
 
 # Install this before enabling the frontend policy. It stays behind on uninstall
 # so launch options already stored by Steam always reference a valid executable.
@@ -88,6 +100,7 @@ if ! mv "$STAGE" "$TARGET"; then
     echo "Plugin replacement failed; previous version restored" >&2
     exit 1
 fi
+sync
 
 echo "Installed Batocera Control $(cat "${TARGET}/VERSION")"
 
@@ -128,17 +141,23 @@ if [ -e "$LEGACY_LSFG" ]; then
 fi
 
 if [ "$NO_RESTART" -eq 0 ] && pgrep -f "[/]${PLUGIN_LOADER#/}" >/dev/null 2>&1; then
-    pkill -f "[/]${PLUGIN_LOADER#/}" 2>/dev/null || true
-    sleep 1
-    HOME="${USERDATA}/system" \
-    XDG_DATA_HOME="${USERDATA}/system/.local/share" \
-    XDG_CONFIG_HOME="${USERDATA}/system/.config" \
-    XDG_CACHE_HOME="${USERDATA}/system/.cache" \
-    DECKY_HOME="${USERDATA}/system/homebrew" \
-    STEAM_COMPAT_CLIENT_INSTALL_PATH="${USERDATA}/system/.local/share/Steam" \
-    STEAM_ROOT="${USERDATA}/system/.local/share/Steam" \
-    nohup "$PLUGIN_LOADER" >> "${USERDATA}/system/logs/decky-loader.log" 2>&1 &
-    echo "Decky PluginLoader restarted"
+    if pgrep -x steam >/dev/null 2>&1 ||
+        pgrep -x steamwebhelper >/dev/null 2>&1 ||
+        pgrep -x gamescope >/dev/null 2>&1; then
+        echo "Decky update staged; PluginLoader will reload on the next SteamOS Mode session"
+    else
+        pkill -f "[/]${PLUGIN_LOADER#/}" 2>/dev/null || true
+        sleep 1
+        HOME="${USERDATA}/system" \
+        XDG_DATA_HOME="${USERDATA}/system/.local/share" \
+        XDG_CONFIG_HOME="${USERDATA}/system/.config" \
+        XDG_CACHE_HOME="${USERDATA}/system/.cache" \
+        DECKY_HOME="${USERDATA}/system/homebrew" \
+        STEAM_COMPAT_CLIENT_INSTALL_PATH="${USERDATA}/system/.local/share/Steam" \
+        STEAM_ROOT="${USERDATA}/system/.local/share/Steam" \
+        nohup "$PLUGIN_LOADER" >> "${USERDATA}/system/logs/decky-loader.log" 2>&1 &
+        echo "Decky PluginLoader restarted"
+    fi
 fi
 
 echo "=== Install complete ==="

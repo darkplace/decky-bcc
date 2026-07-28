@@ -19,6 +19,7 @@ BATOCERA_SETTINGS_GET = "/usr/bin/batocera-settings-get"
 BATOCERA_SETTINGS_SET = "/usr/bin/batocera-settings-set"
 BATOCERA_CONF = Path("/userdata/system/batocera.conf")
 SETTINGS_LOCK = Path("/userdata/system/configs/batocera-control/settings.lock")
+BATOCERA_CONF_LOCK = Path(f"{BATOCERA_CONF}.lock")
 DROPBEAR_INIT = Path("/etc/init.d/S50dropbear")
 _SETTINGS_THREAD_LOCK = threading.RLock()
 
@@ -202,6 +203,57 @@ def settings_set_many(values: list[tuple[str, str]]) -> None:
 
 def settings_set(key: str, value: object) -> None:
     settings_set_many([(key, str(value))])
+
+
+def settings_remove_many(keys: list[str]) -> None:
+    """Remove exact settings while sharing batocera-settings' native lock."""
+    normalized = {str(key) for key in keys}
+    if not normalized:
+        return
+    if any(not key or "\n" in key or "\r" in key or "=" in key for key in normalized):
+        raise ValueError("invalid Batocera setting name")
+
+    with _settings_transaction():
+        BATOCERA_CONF_LOCK.parent.mkdir(parents=True, exist_ok=True)
+        native_fd = os.open(BATOCERA_CONF_LOCK, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(native_fd, fcntl.LOCK_EX)
+            try:
+                before = BATOCERA_CONF.read_bytes()
+            except FileNotFoundError:
+                return
+            except OSError as exc:
+                raise RuntimeError("failed to read batocera.conf") from exc
+
+            clean_before, repaired = _repairable_config(before)
+            if repaired:
+                _backup_corrupt_config(before)
+
+            output = []
+            changed = repaired
+            for raw_line in clean_before.splitlines(keepends=True):
+                content = raw_line.rstrip(b"\r\n")
+                stripped = content.strip()
+                if stripped and not stripped.startswith(b"#") and b"=" in stripped:
+                    raw_key = stripped.split(b"=", 1)[0].strip()
+                    try:
+                        key = raw_key.decode("utf-8")
+                    except UnicodeDecodeError:
+                        key = ""
+                    if key in normalized:
+                        changed = True
+                        continue
+                output.append(raw_line)
+
+            if changed:
+                atomically_write_bytes(BATOCERA_CONF, b"".join(output))
+        finally:
+            fcntl.flock(native_fd, fcntl.LOCK_UN)
+            os.close(native_fd)
+
+
+def settings_remove(key: str) -> None:
+    settings_remove_many([key])
 
 
 def is_batocera() -> bool:

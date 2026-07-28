@@ -84,6 +84,46 @@ export interface InstalledGame {
   name: string;
 }
 
+export interface EmulationChoice {
+  data: string;
+  label: string;
+  cores?: EmulationChoice[];
+}
+
+export interface EmulationFeature {
+  setting: string;
+  label: string;
+  description: string;
+  kind: "select" | "slider" | "text";
+  preset?: string;
+  choices: EmulationChoice[];
+  directValue: string | null;
+  inheritedValue: string | null;
+  inheritedFrom: string | null;
+  effectiveValue: string | null;
+  effectiveLabel?: string;
+  minimum?: number;
+  maximum?: number;
+  step?: number;
+  suffix?: string;
+}
+
+export interface EmulationState {
+  supported: boolean;
+  reason: string;
+  appid?: string;
+  managedId?: string;
+  name?: string;
+  system?: string;
+  systemName?: string;
+  rom?: string;
+  configPrefix?: string;
+  applies?: "next-launch";
+  emulator?: EmulationFeature;
+  core?: EmulationFeature;
+  groups?: { name: string; features: EmulationFeature[] }[];
+}
+
 export interface FexProfile {
   label: string;
   config?: Record<string, string>;

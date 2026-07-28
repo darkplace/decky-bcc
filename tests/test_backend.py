@@ -14,7 +14,7 @@ from unittest import mock
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLUGIN_ROOT / "py_modules"))
 
-from armada_control import back_paddles, calibration, cpu_limit, fan_control, joystick_led, lsfg, paddle_actions, paddle_daemon, power, runtime, system  # noqa: E402
+from armada_control import back_paddles, calibration, cpu_limit, emulation_broker as emulation, fan_control, joystick_led, lsfg, paddle_actions, paddle_daemon, power, runtime, system  # noqa: E402
 
 
 class JoystickLedTests(unittest.TestCase):
@@ -165,6 +165,144 @@ class SystemSettingsTests(unittest.TestCase):
 
             self.assertEqual(conf.read_bytes(), original)
             self.assertEqual(len(list(root.glob("batocera.conf.corrupt-*"))), 1)
+
+    def test_remove_setting_deletes_only_the_exact_active_key(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            conf = root / "batocera.conf"
+            conf_lock = root / "batocera.conf.lock"
+            plugin_lock = root / "settings.lock"
+            conf.write_text(
+                '# snes["Zelda.sfc"].ratio=commented\n'
+                'snes["Zelda.sfc"].ratio=16/9\n'
+                'snes["Zelda.sfc"].ratio_extra=keep\n',
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(system, "BATOCERA_CONF", conf),
+                mock.patch.object(system, "BATOCERA_CONF_LOCK", conf_lock),
+                mock.patch.object(system, "SETTINGS_LOCK", plugin_lock),
+            ):
+                system.settings_remove('snes["Zelda.sfc"].ratio')
+
+            result = conf.read_text(encoding="utf-8")
+            self.assertIn('# snes["Zelda.sfc"].ratio=commented\n', result)
+            self.assertNotIn('snes["Zelda.sfc"].ratio=16/9\n', result)
+            self.assertIn('snes["Zelda.sfc"].ratio_extra=keep\n', result)
+
+
+class EmulationSettingsTests(unittest.TestCase):
+    def fixture(self, root: Path):
+        managed_id = "0123456789abcdef01234567"
+        manifest = root / "managed-games.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "enabled": True,
+                    "games": {
+                        managed_id: {
+                            "id": managed_id,
+                            "system": "snes",
+                            "system_name": "Super Nintendo",
+                            "rom": "/userdata/roms/snes/Zelda.sfc",
+                            "name": "Zelda",
+                            "enabled": True,
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        systems = root / "es_systems.cfg"
+        systems.write_text(
+            """<systemList><system><name>snes</name><emulators>
+            <emulator name="libretro"><cores>
+              <core default="true">snes9x</core><core>bsnes</core>
+            </cores></emulator>
+            <emulator name="mednafen"><cores><core>mednafen_snes</core></cores></emulator>
+            </emulators></system></systemList>""",
+            encoding="utf-8",
+        )
+        features = root / "es_features.cfg"
+        features.write_text(
+            """<features>
+            <sharedFeatures>
+              <feature name="GAME ASPECT RATIO" value="ratio">
+                <choice name="4/3" value="4/3"/><choice name="16/9" value="16/9"/>
+              </feature>
+              <feature name="ENABLE GAMESCOPE" value="gamescope"><choice name="On" value="1"/></feature>
+            </sharedFeatures>
+            <globalFeatures><sharedFeature value="ratio"/><sharedFeature value="gamescope"/></globalFeatures>
+            <emulator name="libretro"><cores>
+              <core name="snes9x"><feature name="REWIND" value="rewind">
+                <choice name="On" value="1"/><choice name="Off" value="0"/>
+              </feature></core>
+              <core name="bsnes"/>
+            </cores></emulator>
+            </features>""",
+            encoding="utf-8",
+        )
+        conf = root / "batocera.conf"
+        conf.write_text(
+            "global.ratio=4/3\n"
+            "snes.ratio=16/9\n"
+            'snes.folder["/userdata/roms/snes"].ratio=4/3\n',
+            encoding="utf-8",
+        )
+        appid = emulation._shortcut_appid(managed_id, "Zelda")
+        return manifest, systems, features, conf, appid
+
+    def patches(self, manifest, systems, features, conf):
+        return (
+            mock.patch.object(emulation, "MANIFEST_PATH", manifest),
+            mock.patch.object(emulation, "ES_SYSTEMS_PATHS", (systems,)),
+            mock.patch.object(emulation, "ES_FEATURES_PATHS", (features,)),
+            mock.patch.object(emulation, "BATOCERA_CONF", conf),
+            mock.patch.object(emulation, "SHADER_CONFIG_DIRS", ()),
+        )
+
+    def test_resolves_managed_appid_configgen_layers_and_filtered_features(self):
+        with tempfile.TemporaryDirectory() as temp:
+            manifest, systems, features, conf, appid = self.fixture(Path(temp))
+            patches = self.patches(manifest, systems, features, conf)
+            with patches[0], patches[1], patches[2], patches[3], patches[4]:
+                state = emulation.get_state(str(appid))
+
+            self.assertTrue(state["supported"])
+            self.assertEqual(state["configPrefix"], 'snes["Zelda.sfc"]')
+            self.assertEqual(state["emulator"]["effectiveValue"], "libretro")
+            self.assertEqual(state["core"]["effectiveValue"], "snes9x")
+            found = {
+                item["setting"]: item
+                for group in state["groups"]
+                for item in group["features"]
+            }
+            self.assertEqual(found["ratio"]["inheritedValue"], "4/3")
+            self.assertEqual(found["ratio"]["inheritedFrom"], "folder")
+            self.assertIn("rewind", found)
+            self.assertNotIn("gamescope", found)
+
+    def test_writes_and_removes_only_valid_per_game_keys(self):
+        with tempfile.TemporaryDirectory() as temp:
+            manifest, systems, features, conf, appid = self.fixture(Path(temp))
+            patches = self.patches(manifest, systems, features, conf)
+            with (
+                patches[0],
+                patches[1],
+                patches[2],
+                patches[3],
+                patches[4],
+                mock.patch.object(emulation, "settings_set") as setter,
+                mock.patch.object(emulation, "settings_remove") as remover,
+            ):
+                emulation.set_game_setting(appid, "ratio", "16/9")
+                emulation.set_game_setting(appid, "ratio", None)
+                with self.assertRaisesRegex(ValueError, "unsupported value"):
+                    emulation.set_game_setting(appid, "ratio", "21/9")
+
+            setter.assert_called_once_with('snes["Zelda.sfc"].ratio', "16/9")
+            remover.assert_called_once_with('snes["Zelda.sfc"].ratio')
 
 
 class CalibrationTests(unittest.TestCase):

@@ -54,6 +54,9 @@ const restartOledCare = () => call("restart_oled_care");
 const saveBackPaddles = (data) => call("save_back_paddles", data);
 const saveLsfg = (data) => call("save_lsfg", data);
 const setLsfgGameEnabled = (appid, enabled) => call("set_lsfg_game_enabled", appid, enabled);
+const getEmulationManagedAppids = () => call("get_emulation_managed_appids");
+const getEmulationState = (appid, emulator = "", core = "") => call("get_emulation_state", appid, emulator, core);
+const setEmulationGameSetting = (appid, setting, value) => call("set_emulation_game_setting", appid, setting, value);
 
 let active = false;
 const listeners = new Set();
@@ -2001,8 +2004,242 @@ function Content() {
                 ] })] }));
 }
 
+const INHERIT = "__batocera_inherit__";
+function inheritedLabel(feature) {
+    const value = feature.inheritedValue;
+    if (value === null || value === undefined || value === "")
+        return "Inherit (Auto)";
+    const choice = feature.choices?.find((item) => item.data === value);
+    return `Inherit (${choice?.label || value})`;
+}
+function SelectFeature({ feature, disabled, onChange, }) {
+    const choices = [
+        { data: INHERIT, label: inheritedLabel(feature) },
+        ...(feature.choices || []),
+    ];
+    return (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.DropdownItem, { label: feature.label, description: feature.description, disabled: disabled, selectedOption: feature.directValue === null ? INHERIT : feature.directValue, rgOptions: choices, onChange: (option) => onChange(option.data === INHERIT ? null : String(option.data)) }) }));
+}
+function SliderFeature({ feature, disabled, onChange, }) {
+    const minimum = Number(feature.minimum ?? 0);
+    const maximum = Number(feature.maximum ?? 100);
+    const step = Number(feature.step ?? 1);
+    const inherited = Number(feature.inheritedValue);
+    const direct = Number(feature.directValue);
+    const value = Number.isFinite(direct)
+        ? direct
+        : Number.isFinite(inherited)
+            ? inherited
+            : minimum;
+    const overridden = feature.directValue !== null;
+    return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ToggleField, { label: feature.label, description: `${feature.description}${feature.description ? " " : ""}${inheritedLabel(feature)}.`, checked: overridden, disabled: disabled, onChange: (enabled) => onChange(enabled ? String(value) : null) }) }), overridden ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.SliderField, { label: "Per-game value", value: value, min: minimum, max: maximum, step: step, valueSuffix: feature.suffix || "", showValue: true, disabled: disabled, onChange: (next) => onChange(String(next)) }) })) : null] }));
+}
+function TextFeature({ feature, disabled, onChange, }) {
+    const [text, setText] = SP_REACT.useState(feature.directValue ?? feature.inheritedValue ?? "");
+    SP_REACT.useEffect(() => {
+        setText(feature.directValue ?? feature.inheritedValue ?? "");
+    }, [feature.directValue, feature.inheritedValue, feature.setting]);
+    const overridden = feature.directValue !== null;
+    return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ToggleField, { label: feature.label, description: `${feature.description}${feature.description ? " " : ""}${inheritedLabel(feature)}.`, checked: overridden, disabled: disabled, onChange: (enabled) => onChange(enabled ? text : null) }) }), overridden ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.Field, { label: "Per-game value", childrenLayout: "below", children: SP_JSX.jsx(DFL.TextField, { value: text, disabled: disabled, onChange: (event) => setText(event.currentTarget.value), onBlur: () => {
+                            if (text !== feature.directValue)
+                                onChange(text);
+                        } }) }) })) : null] }));
+}
+function EmulationSettingsModal({ appid, closeModal, }) {
+    const [state, setState] = SP_REACT.useState(null);
+    const [saving, setSaving] = SP_REACT.useState("");
+    const [error, setError] = SP_REACT.useState("");
+    SP_REACT.useEffect(() => {
+        let cancelled = false;
+        getEmulationState(appid)
+            .then((next) => {
+            if (!cancelled)
+                setState(next);
+        })
+            .catch((reason) => {
+            if (!cancelled)
+                setError(String(reason));
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [appid]);
+    const save = async (setting, value) => {
+        setSaving(setting);
+        setError("");
+        try {
+            setState(await setEmulationGameSetting(appid, setting, value));
+        }
+        catch (reason) {
+            setError(reason instanceof Error ? reason.message : String(reason));
+        }
+        finally {
+            setSaving("");
+        }
+    };
+    const featureControl = (feature) => {
+        const props = {
+            key: feature.setting,
+            feature,
+            disabled: !!saving,
+            onChange: (value) => void save(feature.setting, value),
+        };
+        if (feature.kind === "slider")
+            return SP_JSX.jsx(SliderFeature, { ...props });
+        if (feature.kind === "text")
+            return SP_JSX.jsx(TextFeature, { ...props });
+        return SP_JSX.jsx(SelectFeature, { ...props });
+    };
+    return (SP_JSX.jsxs(DFL.ModalRoot, { onCancel: closeModal, children: [SP_JSX.jsx(DFL.DialogHeader, { children: "Emulation Settings" }), SP_JSX.jsx(DFL.DialogBody, { children: SP_JSX.jsxs("div", { style: {
+                        boxSizing: "border-box",
+                        width: "min(640px, calc(100vw - 160px))",
+                        maxWidth: "100%",
+                        maxHeight: "calc(100vh - 260px)",
+                        minHeight: "160px",
+                        overflowX: "hidden",
+                        overflowY: "auto",
+                        paddingRight: "8px",
+                    }, children: [!state && !error ? SP_JSX.jsx(DFL.Field, { label: "Loading Batocera settings\u2026" }) : null, state && !state.supported ? SP_JSX.jsx(DFL.Field, { label: state.reason || "This shortcut is not managed by Batocera." }) : null, error ? SP_JSX.jsx(DFL.Field, { label: "Could not save setting", description: error }) : null, state?.supported && state.emulator && state.core ? (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.Field, { label: `${state.name} — ${state.systemName}`, description: "Per-game Batocera settings. Inherit removes the game override; changes apply on the next launch." }), SP_JSX.jsxs(DFL.PanelSection, { title: "Emulator", children: [SP_JSX.jsx(SelectFeature, { feature: state.emulator, disabled: !!saving, onChange: (value) => void save("emulator", value) }), SP_JSX.jsx(SelectFeature, { feature: state.core, disabled: !!saving, onChange: (value) => void save("core", value) })] }), (state.groups || []).map((group) => (SP_JSX.jsx(DFL.PanelSection, { title: group.name, children: group.features.map(featureControl) }, group.name)))] })) : null] }) }), SP_JSX.jsx(DFL.DialogFooter, { children: SP_JSX.jsx(DFL.DialogButton, { onClick: closeModal, children: "Close" }) })] }));
+}
+
+const MENU_ITEM_KEY = "batocera-emulation-settings";
+let managedAppids = new Set();
+function unsignedAppid(value) {
+    return Number(value) >>> 0;
+}
+async function refreshEmulationManagedAppids() {
+    const appids = await getEmulationManagedAppids();
+    managedAppids = new Set(appids.map(unsignedAppid).filter(Boolean));
+}
+function eligible(appid) {
+    return managedAppids.has(unsignedAppid(appid));
+}
+function openSettings(appid) {
+    if (!eligible(appid))
+        return;
+    DFL.showModal(SP_REACT.createElement(EmulationSettingsModal, { appid: String(unsignedAppid(appid)) }));
+}
+function dedupe(items) {
+    const index = items.findIndex((item) => item?.key === MENU_ITEM_KEY);
+    if (index >= 0)
+        items.splice(index, 1);
+}
+function resolveItemsAppid(items, fallback) {
+    const owned = items;
+    const current = owned.find((item) => {
+        const appid = item?._owner?.pendingProps?.overview?.appid;
+        return !!appid && appid !== fallback;
+    })?._owner?.pendingProps?.overview?.appid;
+    if (current)
+        return current;
+    const found = DFL.findInTree(items, (node) => !!node?.app?.appid, { walkable: ["props", "children"] });
+    return found?.app?.appid ?? fallback;
+}
+function insertItem(items, fallbackAppid) {
+    dedupe(items);
+    const appid = resolveItemsAppid(items, fallbackAppid);
+    if (!eligible(appid))
+        return;
+    const propertiesIndex = items.findIndex((item) => DFL.findInReactTree(item, (node) => !!node?.onSelected && node.onSelected.toString().includes("AppProperties")));
+    const menuItem = SP_REACT.createElement(DFL.MenuItem, { key: MENU_ITEM_KEY, onSelected: () => openSettings(appid) }, "Emulation Settings");
+    if (propertiesIndex >= 0)
+        items.splice(propertiesIndex, 0, menuItem);
+    else
+        items.push(menuItem);
+}
+function isLibraryAppMenu(items) {
+    return (Array.isArray(items) &&
+        !!DFL.findInReactTree(items, (node) => !!node?.props?.onSelected &&
+            node.props.onSelected.toString().includes("launchSource")));
+}
+function componentAppid(component) {
+    const ownerAppid = component?._owner?.pendingProps?.overview?.appid;
+    if (ownerAppid)
+        return ownerAppid;
+    const found = DFL.findInTree(component?.props?.children, (node) => !!node?.app?.appid, { walkable: ["props", "children"] });
+    return found?.app?.appid ?? 0;
+}
+function libraryContextMenu() {
+    try {
+        const module = DFL.findModuleByExport((candidate) => typeof candidate?.toString === "function" &&
+            candidate.toString().includes("().LibraryContextMenu"));
+        const factory = Object.values(module || {}).find((candidate) => typeof candidate?.toString === "function" &&
+            candidate.toString().includes("navigator:"));
+        return factory ? DFL.fakeRenderComponent(factory)?.type ?? null : null;
+    }
+    catch (error) {
+        console.error("[Batocera Control] LibraryContextMenu lookup failed", error);
+        return null;
+    }
+}
+function applyEmulationMenuPatch() {
+    const menu = libraryContextMenu();
+    if (!menu)
+        return { unpatch: () => undefined };
+    const patches = [];
+    let innerInstalled = false;
+    const outer = DFL.afterPatch(menu.prototype, "render", (_args, component) => {
+        const appid = componentAppid(component);
+        if (!innerInstalled) {
+            innerInstalled = true;
+            const inner = DFL.afterPatch(component, "type", (_innerArgs, rendered) => {
+                const prototype = rendered?.type?.prototype;
+                if (!prototype)
+                    return rendered;
+                patches.push(DFL.afterPatch(prototype, "render", (_renderArgs, result) => {
+                    const items = result?.props?.children?.[0];
+                    if (isLibraryAppMenu(items)) {
+                        try {
+                            insertItem(items, appid);
+                        }
+                        catch (error) {
+                            console.error("[Batocera Control] menu insertion failed", error);
+                        }
+                    }
+                    return result;
+                }));
+                if (typeof prototype.shouldComponentUpdate === "function") {
+                    patches.push(DFL.afterPatch(prototype, "shouldComponentUpdate", (updateArgs, shouldUpdate) => {
+                        const next = updateArgs?.[0]?.children;
+                        if (Array.isArray(next)) {
+                            dedupe(next);
+                            if (shouldUpdate === true)
+                                insertItem(next, appid);
+                        }
+                        return shouldUpdate;
+                    }));
+                }
+                return rendered;
+            });
+            patches.push(inner);
+        }
+        else {
+            const children = component?.props?.children;
+            if (Array.isArray(children))
+                insertItem(children, appid);
+        }
+        return component;
+    });
+    patches.push(outer);
+    return {
+        unpatch() {
+            for (const patch of [...patches].reverse()) {
+                try {
+                    if (!patch.hasUnpatched)
+                        patch.unpatch();
+                }
+                catch (error) {
+                    console.error("[Batocera Control] menu unpatch failed", error);
+                }
+            }
+        },
+    };
+}
+
 var index = definePlugin(() => {
     routerHook.addGlobalComponent("BatoceraControlOledSaver", () => SP_JSX.jsx(OledScreensaverOverlay, {}));
+    const emulationMenuPatch = applyEmulationMenuPatch();
+    void refreshEmulationManagedAppids().catch(() => { });
+    const emulationManifestTimer = window.setInterval(() => void refreshEmulationManagedAppids().catch(() => { }), 15000);
     let unregisterDownloadWatcher = () => { };
     let cancelled = false;
     const persistHandledGames = () => saveCompatApplied(handledGameAppids()).catch(() => { });
@@ -2029,6 +2266,8 @@ var index = definePlugin(() => {
         onDismount() {
             cancelled = true;
             unregisterDownloadWatcher();
+            window.clearInterval(emulationManifestTimer);
+            emulationMenuPatch.unpatch();
             setOledScreensaverActive(false);
             routerHook.removeGlobalComponent("BatoceraControlOledSaver");
         },

@@ -1,5 +1,5 @@
 import { call } from "@decky/api";
-import type { BackPaddleBindings, BackPaddleState, CalibrationState, Capture, Config, CpuLimitConfig, CpuLimitState, FanControlConfig, FanControlState, InstalledGame, JoystickLedConfig, JoystickLedState, LsfgConfig, LsfgState, OledCareConfig, OledCareState, PowerConfig, Tweaks } from "./types";
+import type { BackPaddleBindings, BackPaddleState, CalibrationState, Capture, Config, CpuLimitConfig, CpuLimitState, EmulationState, FanControlConfig, FanControlState, InstalledGame, JoystickLedConfig, JoystickLedState, LsfgConfig, LsfgState, OledCareConfig, OledCareState, PowerConfig, Tweaks } from "./types";
 
 export const getConfig = () => call<[], Config>("get_config");
 export const getInstalledGames = () => call<[], InstalledGame[]>("get_installed_games");
@@ -32,3 +32,8 @@ export const restartOledCare = () => call<[], OledCareState>("restart_oled_care"
 export const saveBackPaddles = (data: BackPaddleBindings) => call<[BackPaddleBindings], BackPaddleState>("save_back_paddles", data);
 export const saveLsfg = (data: LsfgConfig) => call<[LsfgConfig], LsfgState>("save_lsfg", data);
 export const setLsfgGameEnabled = (appid: string, enabled: boolean) => call<[string, boolean], LsfgState>("set_lsfg_game_enabled", appid, enabled);
+export const getEmulationManagedAppids = () => call<[], string[]>("get_emulation_managed_appids");
+export const getEmulationState = (appid: string, emulator = "", core = "") =>
+  call<[string, string, string], EmulationState>("get_emulation_state", appid, emulator, core);
+export const setEmulationGameSetting = (appid: string, setting: string, value: string | null) =>
+  call<[string, string, string | null], EmulationState>("set_emulation_game_setting", appid, setting, value);

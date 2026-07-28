@@ -41,8 +41,10 @@ bash install.sh
 Decky's `PluginLoader` must already be installed (Steam Tools handles that
 first). The installer verifies `PAYLOAD.sha256`, atomically replaces
 `/userdata/system/homebrew/plugins/armada-control`, and never uses git, npm, or
-the network. If Decky is running, it restarts it. Use `--no-restart` when
-installing from an image migration or another service.
+the network. It will restart an idle Decky loader, but leaves a running
+Steam/GamepadUI session untouched; the updated plugin loads the next time
+SteamOS Mode starts. Use `--no-restart` when installing from an image migration
+or another service.
 
 The FEX launch helper is installed at
 `/userdata/system/bin/batocera-control-game-launch`. It intentionally lives
@@ -68,6 +70,14 @@ an old standalone `decky-lsfg-vk` plugin to `homebrew/disabled-plugins` so only
 one control tab is loaded, while retaining its config and `~/lsfg` script for
 rollback. Remove the old `~/lsfg` prefix from per-game Steam launch options
 before using either Batocera activation mode.
+
+### Batocera emulation settings
+
+Batocera-managed ROM shortcuts get an **Emulation Settings** item in the
+game's settings menu. It exposes the emulator, core, and applicable
+`es_features.cfg` options for that ROM. Values are validated by the backend and
+stored as the same per-game keys ES writes to `batocera.conf`; choosing
+**Inherit** removes the override. Changes apply on the next game launch.
 
 ### Power, adaptive CPU/TDP, and fan control
 

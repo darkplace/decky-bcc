@@ -1,6 +1,6 @@
 {
   "name": "Batocera Control",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "maintainer": "suckbluefrog <suckbluefrog@proton.me>",
   "upstream": {
     "repository": "https://github.com/virtudude/armada",
@@ -15,7 +15,7 @@
     "repository": "https://github.com/xXJSONDeruloXx/decky-lsfg-vk",
     "commit": "6aa69db7a6895c89ffa99498beb017ad12d1b9ce"
   },
-  "audited": "2026-07-14",
+  "audited": "2026-07-28",
   "testedOn": [
     "Batocera Odin 3 / SM8750",
     "Batocera AYN Thor / SM8550",

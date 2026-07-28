@@ -8,10 +8,17 @@ import {
   registerDownloadWatcher,
   sweepInstalledGames,
 } from "./lib/steamCompat";
+import { applyEmulationMenuPatch, refreshEmulationManagedAppids } from "./lib/emulationMenu";
 import { setOledScreensaverActive } from "./lib/oledScreensaver";
 
 export default definePlugin(() => {
   routerHook.addGlobalComponent("BatoceraControlOledSaver", () => <OledScreensaverOverlay />);
+  const emulationMenuPatch = applyEmulationMenuPatch();
+  void refreshEmulationManagedAppids().catch(() => {});
+  const emulationManifestTimer = window.setInterval(
+    () => void refreshEmulationManagedAppids().catch(() => {}),
+    15000,
+  );
   let unregisterDownloadWatcher = () => {};
   let cancelled = false;
   const persistHandledGames = () => saveCompatApplied(handledGameAppids()).catch(() => {});
@@ -41,6 +48,8 @@ export default definePlugin(() => {
     onDismount() {
       cancelled = true;
       unregisterDownloadWatcher();
+      window.clearInterval(emulationManifestTimer);
+      emulationMenuPatch.unpatch();
       setOledScreensaverActive(false);
       routerHook.removeGlobalComponent("BatoceraControlOledSaver");
     },

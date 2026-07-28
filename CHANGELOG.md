@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.12 - 2026-07-28
+
+- Add an **Emulation Settings** item to the GamepadUI settings menu for
+  Batocera-managed ROM shortcuts, exposing validated per-game emulator, core,
+  and applicable `es_features.cfg` options with configgen-compatible
+  inheritance.
+- Remove a per-game key when **Inherit** is selected, using the same
+  `batocera.conf` locking and atomic-write protections as the rest of the
+  plugin.
+- Keep the emulation dialog within GamepadUI's available viewport and refresh
+  the managed AppID set as ES adds or removes Steam shortcuts.
+- Verify the fully staged plugin payload before installation and defer Decky
+  reloads while Steam/GamepadUI is active, avoiding a mid-session webhelper
+  disruption.
+- Override the stale Rollup helper transitive dependencies with compatible
+  audit-clean releases used only by the build pipeline.
+
 ## 0.2.11 - 2026-07-14
 
 - Make every named joystick-ring color an exact RGB preset, so red writes
