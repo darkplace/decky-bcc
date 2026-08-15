@@ -30,6 +30,33 @@ the host Control Center option is labeled explicitly so it is not confused
 with this Decky panel. Mouse mode temporarily replaces normal gamepad
 navigation until its assigned paddle is pressed again.
 
+### Handy Steam / Decky shortcuts (Odin)
+
+These are the shortcuts that matter most once Batocera Control is installed
+inside Steam GamepadUI. **Home** is the physical Guide / Mode button.
+
+| Shortcut | Where | What it does |
+|----------|--------|--------------|
+| **⋯ (QAM) → Performance → Performance Overlay** | Steam GamepadUI | Native FPS / HUD level (Off / FPS / full). Needs Gamescope **MangoApp** running (enabled by default on ARM SteamOS sessions). |
+| **M1 + M2** (default after you opt in) | Batocera Control → Back Paddles | `Toggle MangoHud` via `mangohudctl toggle no_display` (show/hide without changing the QAM preset). |
+| **⋯ → Batocera Control** | Steam Quick Access | Plugin tabs: Compatibility, Power, LSFG, Paddles, Settings, … |
+| **Compatibility → Re-apply to running game** | Plugin | Push nice / CPU affinity to the live SteamLaunch tree (Non-Steam titles match signed UI ids and unsigned `AppId=`). |
+| **Power → eco / balanced / performance** | Plugin | Stock Qualcomm path: CPU governor + `qcom-fan` (Silent / Auto / Aggressive). |
+| **Paddle → Cycle power** | Back Paddles | Walks the same stock profiles (or governors if profiles are absent). |
+| **Settings → Sleep Mode** | Plugin | `s2idle` / `deep` when the kernel advertises both; restored at boot by `batocera_control_boot`. |
+
+**MangoHud tip:** the overlay starts **hidden** (`no_display` in
+`~/.local/share/Steam/config/mangohud.conf`). Use the QAM slider to pick a
+preset, then **M1+M2** (or QAM again) to show/hide. If neither works, the
+Steam session likely started without `--mangoapp` — restart Steam after an
+image/script update that enables `BATOCERA_STEAM_GS_MANGOAPP` on ARM.
+
+**LSFG tip:** place the purchased DLL at
+`/userdata/system/wine/lossless-scaling/Lossless.dll`. Global mode needs a
+Steam restart; per-game mode wraps launch options and applies on the next
+game start. Non-Steam shortcuts use the **unsigned** AppID in the LSFG list
+(same value SteamLaunch prints as `AppId=`).
+
 ## Install on Batocera
 
 Extract a release and run as root:

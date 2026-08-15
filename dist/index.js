@@ -411,10 +411,13 @@ function titleCase(value) {
 
 const apps = () => window.SteamClient?.Apps;
 const settings = () => window.SteamClient?.Settings;
-// Keep in sync with PROTON_TOOL_NAME (build) and PROTON_11_STABLE (armada-fixups).
-const DEFAULT_WINDOWS_COMPAT_TOOL = "proton-cachyos-11.0-arm64";
+// Valve ARM tip (AppID 4628740) — Armada's Proton default; not x86 Proton Experimental.
+const DEFAULT_WINDOWS_COMPAT_TOOL = "proton11_arm64";
 const USE_DEFAULT_COMPAT = "__armada_default__";
 const FOLLOW_STEAM_COMPAT = "__steam_default__";
+/** x86 Steam Proton Experimental — broken/confusing on ARM handhelds. */
+const HIDDEN_COMPAT_TOOL_IDS = new Set(["proton_experimental", "proton-experimental"]);
+const HIDDEN_COMPAT_LABEL_RE = /proton\s*[- ]?experimental/i;
 let windowsCompatTool = DEFAULT_WINDOWS_COMPAT_TOOL;
 let autoApplyCompat = true;
 let launchWrapper = "";
@@ -447,6 +450,19 @@ function markCompatHandled(appid) {
     handledAppids.add(appid);
     return handledAppids.size !== size;
 }
+function decorateCompatTool(tool) {
+    if (tool.id === "proton11_arm64" || tool.id === "Proton11ARM") {
+        return { ...tool, label: "Proton 11.0 (ARM64) ★ recommended" };
+    }
+    return tool;
+}
+function isHiddenCompatTool(tool) {
+    if (!tool.id)
+        return true;
+    if (HIDDEN_COMPAT_TOOL_IDS.has(tool.id))
+        return true;
+    return HIDDEN_COMPAT_LABEL_RE.test(tool.id) || HIDDEN_COMPAT_LABEL_RE.test(tool.label);
+}
 function mapCompatTools(raw) {
     if (!Array.isArray(raw))
         return [];
@@ -455,7 +471,8 @@ function mapCompatTools(raw) {
         id: String(tool?.strToolName ?? tool?.strName ?? tool?.name ?? ""),
         label: String(tool?.strDisplayName ?? tool?.strToolName ?? tool?.strName ?? ""),
     }))
-        .filter((tool) => tool.id);
+        .filter((tool) => !isHiddenCompatTool(tool))
+        .map(decorateCompatTool);
 }
 async function getProtonTools(refresh = false) {
     if (!refresh && protonToolsCache.length && Date.now() - protonToolsCachedAt < 5000)

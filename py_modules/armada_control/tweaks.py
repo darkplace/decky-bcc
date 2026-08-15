@@ -53,6 +53,16 @@ def _read_tweaks_file(path: Path) -> dict | None:
     return loaded if isinstance(loaded, dict) else None
 
 
+def _is_appid_key(value) -> bool:
+    """True for Steam appids, including signed Non-Steam shortcut ids."""
+    text = str(value).strip()
+    if not text:
+        return False
+    if text[0] in "+-":
+        text = text[1:]
+    return text.isdigit()
+
+
 def load_tweaks():
     contract = load_fex_contract()
     loaded = _read_tweaks_file(TWEAKS_USERDATA)
@@ -68,7 +78,7 @@ def load_tweaks():
         if isinstance(loaded.get("games"), dict):
             data["games"] = {
                 str(k): v for k, v in loaded["games"].items()
-                if str(k).isdigit() and isinstance(v, dict)
+                if _is_appid_key(k) and isinstance(v, dict)
             }
     data["games"] = {
         gid: {key: value for key, value in game.items() if key != "enabled"}
@@ -89,7 +99,7 @@ def sanitize_tweaks(data):
     raw_games = data.get("games")
     if isinstance(raw_games, dict):
         for gid, game in raw_games.items():
-            if str(gid).isdigit() and isinstance(game, dict):
+            if _is_appid_key(gid) and isinstance(game, dict):
                 clean["games"][str(gid)] = game
     return clean
 
@@ -109,13 +119,13 @@ def load_compat_applied():
     appids = loaded.get("appids") if isinstance(loaded, dict) else None
     if not isinstance(appids, list):
         return []
-    return sorted({str(appid) for appid in appids if str(appid).isdigit()}, key=int)
+    return sorted({str(appid) for appid in appids if _is_appid_key(appid)}, key=lambda value: int(value))
 
 
 def save_compat_applied(appids):
     if not isinstance(appids, list) or len(appids) > 100_000:
         raise ValueError("invalid compatibility state")
-    clean = sorted({str(appid) for appid in appids if str(appid).isdigit()}, key=int)
+    clean = sorted({str(appid) for appid in appids if _is_appid_key(appid)}, key=lambda value: int(value))
     text = json.dumps({"appids": clean}, indent=2, sort_keys=True) + "\n"
     atomically_write(COMPAT_APPLIED_STATE, text, 0o644)
     return clean

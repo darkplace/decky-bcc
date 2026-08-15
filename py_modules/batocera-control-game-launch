@@ -21,9 +21,28 @@ FEX_PROFILES_CONFIG = pathlib.Path("/userdata/system/configs/batocera-control/fe
 def appid() -> str | None:
     for key in ("STEAM_COMPAT_APP_ID", "SteamAppId", "SteamGameId"):
         value = os.environ.get(key, "").strip()
-        if value.isdigit():
+        if value.isdigit() or (value[:1] in "+-" and value[1:].isdigit()):
             return value
     return None
+
+
+def appid_key_forms(game_id: str | None) -> list[str]:
+    """Steam UI may store signed Non-Steam ids; SteamLaunch uses unsigned."""
+    if not game_id:
+        return []
+    raw = str(game_id).strip()
+    if not raw:
+        return []
+    forms = {raw}
+    try:
+        value = int(raw)
+    except ValueError:
+        return [raw]
+    unsigned = value & 0xFFFFFFFF
+    forms.add(str(unsigned))
+    if unsigned >= 2**31:
+        forms.add(str(unsigned - 2**32))
+    return list(forms)
 
 
 def load_json(path: pathlib.Path) -> object:
@@ -61,9 +80,20 @@ def load_tweaks(defaults: dict) -> dict:
     return data
 
 
+def _game_entry(tweaks: dict, game_id: str | None) -> dict | None:
+    games = tweaks.get("games") or {}
+    if not isinstance(games, dict):
+        return None
+    for key in appid_key_forms(game_id):
+        game = games.get(key)
+        if isinstance(game, dict):
+            return game
+    return None
+
+
 def merged_settings(tweaks: dict, game_id: str | None) -> dict:
     settings = dict(tweaks.get("global", {}))
-    game = tweaks.get("games", {}).get(str(game_id)) if game_id else None
+    game = _game_entry(tweaks, game_id)
     if isinstance(game, dict) and game.get("enabled") is not False:
         settings.update(game)
     return settings
@@ -78,7 +108,7 @@ def merged_env(tweaks: dict, game_id: str | None) -> dict[str, str]:
             name = str(key)
             if isinstance(value, str) and name and "=" not in name and "\0" not in name:
                 result[name] = value
-    game = tweaks.get("games", {}).get(str(game_id)) if game_id else None
+    game = _game_entry(tweaks, game_id)
     if isinstance(game, dict) and game.get("enabled") is not False:
         game_env = game.get("env")
         if isinstance(game_env, dict):

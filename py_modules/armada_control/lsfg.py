@@ -262,10 +262,23 @@ def save_state(data: object) -> dict[str, object]:
     return get_state()
 
 
-def set_game_enabled(appid: object, enabled: object) -> dict[str, object]:
-    appid = str(appid)
-    if not appid.isdigit() or int(appid) <= 0:
+def _normalize_steam_appid(appid: object) -> str:
+    """Steam UI may pass signed Non-Steam ids; LSFG/SteamLaunch use unsigned."""
+    text = str(appid).strip()
+    if not text:
         raise ValueError("Steam app ID must be a positive integer")
+    try:
+        value = int(text)
+    except ValueError as exc:
+        raise ValueError("Steam app ID must be a positive integer") from exc
+    unsigned = value & 0xFFFFFFFF
+    if unsigned == 0:
+        raise ValueError("Steam app ID must be a positive integer")
+    return str(unsigned)
+
+
+def set_game_enabled(appid: object, enabled: object) -> dict[str, object]:
+    appid = _normalize_steam_appid(appid)
     if not isinstance(enabled, bool):
         raise ValueError("per-game LSFG enabled state must be a boolean")
 

@@ -44,13 +44,16 @@ def online_cpus() -> list[int]:
 
 
 def resolve_cores(value) -> list[int] | None:
-    """None/'' = unset. 'all' = every online CPU. Otherwise a cpulist string."""
+    """None/'' = unset. 'all' = every online CPU. Otherwise a cpulist string or int list."""
     if value in (None, ""):
         return None
     available = set(online_cpus())
     if value == "all":
         return sorted(available)
-    cpus = parse_cpulist(str(value))
+    if isinstance(value, (list, tuple, set)):
+        cpus = sorted({int(cpu) for cpu in value})
+    else:
+        cpus = parse_cpulist(str(value))
     unknown = [cpu for cpu in cpus if cpu not in available]
     if unknown:
         raise ValueError(f"unknown cpus: {unknown}")
@@ -113,6 +116,31 @@ def descendant_pids(root_pid: int) -> list[int]:
     return out
 
 
+def appid_key_forms(appid: str | None) -> list[str]:
+    """Steam Non-Steam shortcuts use signed appids; SteamLaunch uses unsigned."""
+    if appid is None:
+        return []
+    raw = str(appid).strip()
+    if not raw:
+        return []
+    forms = {raw}
+    try:
+        value = int(raw)
+    except ValueError:
+        return [raw]
+    unsigned = value & 0xFFFFFFFF
+    forms.add(str(unsigned))
+    if unsigned >= 2**31:
+        forms.add(str(unsigned - 2**32))
+    return list(forms)
+
+
+def _cmdline_matches_appid(joined: bytes, appid: str | None) -> bool:
+    if not appid:
+        return True
+    return any(f"AppId={form}".encode() in joined for form in appid_key_forms(appid))
+
+
 def steam_session_pid(pid: int, appid: str | None) -> int:
     current, match = pid, None
     for _ in range(32):
@@ -121,7 +149,8 @@ def steam_session_pid(pid: int, appid: str | None) -> int:
             stat = Path(f"/proc/{current}/stat").read_text(encoding="utf-8", errors="replace")
         except OSError:
             break
-        if b"SteamLaunch" in argv and (not appid or f"AppId={appid}".encode() in b" ".join(argv)):
+        joined = b" ".join(argv)
+        if b"SteamLaunch" in argv and _cmdline_matches_appid(joined, appid):
             match = current
         try:
             ppid = int(stat.rsplit(")", 1)[1].split()[1])
@@ -151,7 +180,7 @@ def find_running_game_pid(appid: str | None = None) -> int | None:
         if b"SteamLaunch" not in argv:
             continue
         joined = b" ".join(argv)
-        if wanted and f"AppId={wanted}".encode() not in joined:
+        if wanted and not _cmdline_matches_appid(joined, wanted):
             continue
         pid = int(entry.name)
         session = steam_session_pid(pid, wanted or None)
@@ -198,12 +227,21 @@ def apply_to_self(*, nice: int | None = None, cores: list[int] | None = None) ->
             pass
 
 
-def reapply_from_tweaks(tweaks: dict, appid: str | None) -> dict:
+def _merged_game_settings(tweaks: dict, appid: str | None) -> dict:
     settings = dict(tweaks.get("global") or {})
-    if appid:
-        game = (tweaks.get("games") or {}).get(str(appid))
+    games = tweaks.get("games") or {}
+    if not isinstance(games, dict):
+        return settings
+    for key in appid_key_forms(appid):
+        game = games.get(key)
         if isinstance(game, dict) and game.get("enabled") is not False:
             settings.update(game)
+            break
+    return settings
+
+
+def reapply_from_tweaks(tweaks: dict, appid: str | None) -> dict:
+    settings = _merged_game_settings(tweaks, appid)
     clean = sanitize_perf(settings)
     pid = find_running_game_pid(appid)
     if pid is None:

@@ -13,10 +13,13 @@ type CompatRoute = "windows" | "linux";
 const apps = () => window.SteamClient?.Apps;
 const settings = () => window.SteamClient?.Settings;
 
-// Keep in sync with PROTON_TOOL_NAME (build) and PROTON_11_STABLE (armada-fixups).
-export const DEFAULT_WINDOWS_COMPAT_TOOL = "proton-cachyos-11.0-arm64";
+// Valve ARM tip (AppID 4628740) — Armada's Proton default; not x86 Proton Experimental.
+export const DEFAULT_WINDOWS_COMPAT_TOOL = "proton11_arm64";
 export const USE_DEFAULT_COMPAT = "__armada_default__";
 export const FOLLOW_STEAM_COMPAT = "__steam_default__";
+/** x86 Steam Proton Experimental — broken/confusing on ARM handhelds. */
+const HIDDEN_COMPAT_TOOL_IDS = new Set(["proton_experimental", "proton-experimental"]);
+const HIDDEN_COMPAT_LABEL_RE = /proton\s*[- ]?experimental/i;
 let windowsCompatTool = DEFAULT_WINDOWS_COMPAT_TOOL;
 let autoApplyCompat = true;
 let launchWrapper = "";
@@ -54,6 +57,19 @@ export function markCompatHandled(appid: string): boolean {
   return handledAppids.size !== size;
 }
 
+function decorateCompatTool(tool: CompatTool): CompatTool {
+  if (tool.id === "proton11_arm64" || tool.id === "Proton11ARM") {
+    return { ...tool, label: "Proton 11.0 (ARM64) ★ recommended" };
+  }
+  return tool;
+}
+
+function isHiddenCompatTool(tool: CompatTool): boolean {
+  if (!tool.id) return true;
+  if (HIDDEN_COMPAT_TOOL_IDS.has(tool.id)) return true;
+  return HIDDEN_COMPAT_LABEL_RE.test(tool.id) || HIDDEN_COMPAT_LABEL_RE.test(tool.label);
+}
+
 function mapCompatTools(raw: any): CompatTool[] {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -61,7 +77,8 @@ function mapCompatTools(raw: any): CompatTool[] {
       id: String(tool?.strToolName ?? tool?.strName ?? tool?.name ?? ""),
       label: String(tool?.strDisplayName ?? tool?.strToolName ?? tool?.strName ?? ""),
     }))
-    .filter((tool: CompatTool) => tool.id);
+    .filter((tool: CompatTool) => !isHiddenCompatTool(tool))
+    .map(decorateCompatTool);
 }
 
 export async function getProtonTools(refresh = false): Promise<CompatTool[]> {

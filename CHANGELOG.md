@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.18 - 2026-08-15
+
+- Compatibility Performance Re-apply: match Non-Steam shortcuts by both signed
+  and unsigned AppIDs (Steam UI vs SteamLaunch `AppId=`), so per-game nice/cores
+  apply while the game is running.
+- Keep signed Non-Steam AppIDs in `game-tweaks.json` (`isdigit()` was dropping
+  keys like `-1622943097`).
+- Accept CPU affinity as an int list in addition to cpulist strings.
+- LSFG per-game enable normalizes signed Non-Steam AppIDs to unsigned
+  SteamLaunch form.
+- Game launch helper resolves signed/unsigned AppID aliases for env and
+  FEX/perf settings (so Non-Steam tweaks apply on next launch).
+
+## 0.2.17 - 2026-08-15
+
+- Default Windows Proton is Valve **Proton 11.0 (ARM64)** (`proton11_arm64` /
+  AppID 4628740), labeled ★ recommended in Compatibility.
+- Hide x86 **Proton Experimental** from Batocera Control tool pickers on ARM
+  (it still may appear in Steam's native Properties UI).
+
 ## 0.2.16 - 2026-08-15
 
 - Compatibility Performance: optional nice + CPU affinity (cpulist), applied
