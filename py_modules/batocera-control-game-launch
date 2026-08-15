@@ -69,6 +69,35 @@ def merged_settings(tweaks: dict, game_id: str | None) -> dict:
     return settings
 
 
+def merged_env(tweaks: dict, game_id: str | None) -> dict[str, str]:
+    """Merge global/per-game env; null tombstones clear an inherited key."""
+    result: dict[str, str] = {}
+    global_env = tweaks.get("global", {}).get("env")
+    if isinstance(global_env, dict):
+        for key, value in global_env.items():
+            name = str(key)
+            if isinstance(value, str) and name and "=" not in name and "\0" not in name:
+                result[name] = value
+    game = tweaks.get("games", {}).get(str(game_id)) if game_id else None
+    if isinstance(game, dict) and game.get("enabled") is not False:
+        game_env = game.get("env")
+        if isinstance(game_env, dict):
+            for key, value in game_env.items():
+                name = str(key)
+                if not name or "=" in name or "\0" in name:
+                    continue
+                if value is None:
+                    result.pop(name, None)
+                elif isinstance(value, str):
+                    result[name] = value
+    return result
+
+
+def apply_env(env: dict[str, str]) -> None:
+    for key, value in env.items():
+        os.environ[key] = value
+
+
 def base_fex_config() -> dict:
     for path in BASE_FEX_CONFIGS:
         try:
@@ -138,8 +167,11 @@ def main() -> int:
         return 2
     try:
         contract = load_contract()
-        settings = merged_settings(load_tweaks(contract["defaults"]), appid())
-        apply_fex(settings, appid(), contract["profiles"])
+        tweaks = load_tweaks(contract["defaults"])
+        game_id = appid()
+        settings = merged_settings(tweaks, game_id)
+        apply_fex(settings, game_id, contract["profiles"])
+        apply_env(merged_env(tweaks, game_id))
     except Exception as exc:
         # Settings must never become a reason a game stops launching.
         print(f"batocera-control-game-launch: settings skipped: {exc}", file=sys.stderr)

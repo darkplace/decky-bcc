@@ -121,7 +121,7 @@ def parsed_power(parser):
 
 
 # Only editable fields are written to /etc; factory-only fields stay in /usr.
-EDITABLE_KEYS = ("cpu_max", "cpu_underclock", "gpu_max", "gpu_min", "fan_curve")
+EDITABLE_KEYS = ("cpu_governor", "cpu_max", "cpu_underclock", "gpu_max", "gpu_min", "fan_curve")
 NUMERIC_KEYS = ("cpu_max", "gpu_max", "gpu_min")
 
 

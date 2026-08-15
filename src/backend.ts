@@ -20,6 +20,8 @@ export const saveCompatApplied = (appids: string[]) => {
   return request;
 };
 export const setSshEnabled = (enabled: boolean) => call<[boolean], boolean>("set_ssh_enabled", enabled);
+export const setSleepMode = (value: string) => call<[string], string>("set_sleep_mode", value);
+export const setCpuGovernor = (value: string) => call<[string], string>("set_cpu_governor", value);
 export const setControllerType = (value: string) => call<[string], string>("set_controller_type", value);
 export const getControllerState = () => call<[], CalibrationState>("get_controller_state");
 export const saveCalibration = (capture: Capture) => call<[Capture], CalibrationState>("save_calibration", capture);

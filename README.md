@@ -106,6 +106,12 @@ Rear-paddle shortcuts call stock Batocera binaries where possible
 (`mangohudctl`, `qcom-fan`, `batocera-brightness`, uinput). Maintainer-only
 userdata scripts are never required for those actions.
 
+Compatibility lists regular Steam apps and Non-Steam `shortcuts.vdf` titles,
+and can edit environment variables that the launch helper injects on the next
+game start. Settings exposes Sleep Mode when the kernel advertises more than
+one `/sys/power/mem_sleep` option. The Power tab offers a stock CPU governor
+control when Armada-style `odin-power` profiles are not installed.
+
 ### OLED care and screensaver
 
 Automatic idle-dim (legacy `odin-oled-care` userdata service) is **deferred**

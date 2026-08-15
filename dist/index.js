@@ -17,6 +17,7 @@ if (api._version != API_VERSION) {
 }
 const call = api.call;
 const routerHook = api.routerHook;
+const toaster = api.toaster;
 const definePlugin = (fn) => {
     return (...args) => {
         return fn(...args);
@@ -42,6 +43,8 @@ const saveCompatApplied = (appids) => {
     return request;
 };
 const setSshEnabled = (enabled) => call("set_ssh_enabled", enabled);
+const setSleepMode = (value) => call("set_sleep_mode", value);
+const setCpuGovernor = (value) => call("set_cpu_governor", value);
 const setControllerType = (value) => call("set_controller_type", value);
 const getControllerState = () => call("get_controller_state");
 const saveCalibration = (capture) => call("save_calibration", capture);
@@ -223,13 +226,18 @@ const tabIcons = {
 function gameDisplayName(game) {
     if (!game?.appid)
         return "";
-    return game.name || `App ${game.appid}`;
+    const base = game.name || `App ${game.appid}`;
+    return game.nonSteam ? `${base} (Non-Steam)` : base;
 }
 function availableGames(config) {
     const games = new Map();
     for (const game of config.installedGames || []) {
         if (game?.appid) {
-            games.set(String(game.appid), { appid: String(game.appid), name: game.name || `App ${game.appid}` });
+            games.set(String(game.appid), {
+                appid: String(game.appid),
+                name: game.name || `App ${game.appid}`,
+                nonSteam: !!game.nonSteam,
+            });
         }
     }
     for (const [appid, settings] of Object.entries(config.tweaks?.games || {})) {
@@ -942,6 +950,24 @@ function ConfirmResetAllModal({ closeModal, onConfirm }) {
     };
     return (SP_JSX.jsxs(DFL.ModalRoot, { onCancel: closeModal, children: [SP_JSX.jsx(DFL.DialogBody, { children: "This removes all per-game Armada settings, resets resolution overrides, applies the default Proton where Steam selects Proton, and leaves native Linux selections with Steam." }), SP_JSX.jsxs(DFL.DialogFooter, { children: [SP_JSX.jsx(DFL.DialogButton, { onClick: confirm, children: "Reset All Games" }), SP_JSX.jsx(DFL.DialogButton, { onClick: closeModal, children: "Cancel" })] })] }));
 }
+function EnvVarModal({ closeModal, initialKey, initialValue, onSave, onDelete, }) {
+    const [key, setKey] = SP_REACT.useState(initialKey);
+    const [value, setValue] = SP_REACT.useState(initialValue);
+    const [nameError, setNameError] = SP_REACT.useState("");
+    const save = () => {
+        const name = key.trim();
+        if (!name || name.includes("=") || name.includes("\0")) {
+            setNameError("Invalid name: must be non-empty, no '='");
+            return;
+        }
+        onSave(name, value);
+        closeModal?.();
+    };
+    return (SP_JSX.jsxs(DFL.ModalRoot, { onCancel: closeModal, children: [SP_JSX.jsxs(DFL.DialogBody, { children: [SP_JSX.jsx(DFL.TextField, { label: "Name", value: key, onChange: (event) => setKey(event.target.value) }), nameError ? SP_JSX.jsx(DFL.Field, { description: nameError }) : null, SP_JSX.jsx(DFL.TextField, { label: "Value", value: value, onChange: (event) => setValue(event.target.value) })] }), SP_JSX.jsx(DFL.DialogFooter, { children: SP_JSX.jsxs(DFL.Focusable, { style: { display: "flex", flexDirection: "row", gap: "8px", width: "100%" }, children: [SP_JSX.jsx(DFL.DialogButton, { onClick: save, children: "Save" }), onDelete ? (SP_JSX.jsx(DFL.DialogButton, { onClick: () => {
+                                onDelete();
+                                closeModal?.();
+                            }, children: "Delete" })) : null, SP_JSX.jsx(DFL.DialogButton, { onClick: closeModal, children: "Cancel" })] }) })] }));
+}
 function Compatibility({ config, setConfig }) {
     const [resolution, setResolution] = SP_REACT.useState("Default");
     const [defaultResolution, setDefaultResolution] = SP_REACT.useState(getGlobalResolution());
@@ -949,6 +975,7 @@ function Compatibility({ config, setConfig }) {
     const [resettingAll, setResettingAll] = SP_REACT.useState(false);
     const [customSelected, setCustomSelected] = SP_REACT.useState(false);
     const [showThunks, setShowThunks] = SP_REACT.useState(false);
+    const [showEnv, setShowEnv] = SP_REACT.useState(false);
     const [compatTools, setCompatTools] = SP_REACT.useState([]);
     const [perGameTools, setPerGameTools] = SP_REACT.useState([]);
     const [currentTool, setCurrentTool] = SP_REACT.useState("");
@@ -1185,7 +1212,7 @@ function Compatibility({ config, setConfig }) {
         setGlobalTool(name);
         setWindowsCompatTool(name);
         patchSettings({ windowsCompatTool: name });
-        await migrateWindowsCompatTool(config.installedGames.map((installed) => installed.appid), oldTool, name);
+        await migrateWindowsCompatTool(config.installedGames.filter((installed) => !installed.nonSteam).map((installed) => installed.appid), oldTool, name);
         persistHandledGames();
     };
     const selectableTools = new Map();
@@ -1241,14 +1268,45 @@ function Compatibility({ config, setConfig }) {
     const setKnob = (key, on) => patchSettings({ fexProfile: "custom", fexConfig: { ...fexConfig, [key]: on ? "1" : "0" } });
     const thunks = values.thunks || {};
     const setThunk = (module, on) => patchSettings({ thunks: { ...thunks, [module]: on } });
+    // env merges per-entry; unchecking a default var stores a null tombstone
+    const ownEnv = ((editingDefault ? tweaks.global.env : gameSettings.env) || {});
+    const globalEnv = ((!editingDefault && tweaks.global.env) || {});
+    const patchOwnEnv = (mutate) => {
+        const next = { ...ownEnv };
+        mutate(next);
+        patchSettings({ env: Object.keys(next).length ? next : undefined });
+    };
+    const saveEnvVar = (oldKey, key, value) => {
+        patchOwnEnv((next) => {
+            if (oldKey && oldKey !== key)
+                delete next[oldKey];
+            next[key] = value;
+        });
+    };
+    const deleteEnvVar = (key) => {
+        patchOwnEnv((next) => {
+            delete next[key];
+        });
+    };
+    const openEnvVar = (key) => {
+        DFL.showModal(SP_JSX.jsx(EnvVarModal, { initialKey: key || "", initialValue: key ? String(ownEnv[key] ?? "") : "", onSave: (nextKey, nextValue) => saveEnvVar(key, nextKey, nextValue), onDelete: key ? () => deleteEnvVar(key) : undefined }));
+    };
+    const inheritedEnvEntries = Object.entries(globalEnv).filter(([key]) => typeof ownEnv[key] !== "string");
+    const ownEnvEntries = Object.entries(ownEnv).filter(([, value]) => typeof value === "string");
+    const envControls = (SP_JSX.jsxs(SP_JSX.Fragment, { children: [inheritedEnvEntries.length ? SP_JSX.jsx("div", { className: "armada-subheader", children: "Default Variables" }) : null, inheritedEnvEntries.map(([key, value]) => (SP_JSX.jsx(DFL.ToggleField, { label: String(value) ? `${key}=${String(value)}` : key, checked: ownEnv[key] !== null, onChange: (on) => patchOwnEnv((next) => {
+                    if (on)
+                        delete next[key];
+                    else
+                        next[key] = null;
+                }) }, key))), inheritedEnvEntries.length ? SP_JSX.jsx("div", { className: "armada-subheader", children: "Per-Game Variables" }) : null, ownEnvEntries.map(([key, value]) => (SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: () => openEnvVar(key), children: SP_JSX.jsx("div", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "left" }, children: value ? `${key}=${value}` : key }) }, key))), SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: () => openEnvVar(null), children: "+ Add Variable" }), SP_JSX.jsx(DFL.Field, { label: "Applies on next launch", description: "Variables are injected by batocera-control-game-launch before the game starts." })] }));
     return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsxs(DFL.PanelSection, { title: "EDIT GAME PROFILE", children: [SP_JSX.jsx(SelectEdit, { value: game?.appid || "", options: gameOptions, onChange: setSelectedGame }), SP_JSX.jsx("div", { className: "armada-compat-note", children: "Compatibility changes apply on next launch" })] }), SP_JSX.jsxs(DFL.PanelSection, { title: "PROFILE SETTINGS", children: [editingDefault ? (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(SelectEdit, { labelBelow: true, label: "Default Proton", value: globalTool, options: toolOptions, onChange: onSelectGlobalDefault }), SP_JSX.jsx(DFL.ToggleField, { label: "Apply to New Games", checked: tweaks.global.autoApplyCompat !== false, onChange: (enabled) => {
                                     setAutoApplyCompat(enabled);
                                     patchSettings({ autoApplyCompat: enabled });
                                 } }), SP_JSX.jsx(SelectEdit, { label: "Game Resolution", value: defaultResolution, options: resolutionOptions, onChange: setSteamDefaultResolution })] })) : (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(SelectEdit, { labelBelow: true, label: "Compatibility Tool", value: currentTool, options: perGameToolOptions, onChange: onSelectPerGameTool }), SP_JSX.jsx(SelectEdit, { label: "Game Resolution", value: resolution, options: resolutionOptions, onChange: setSteamResolution })] })), resolutionMessage ? SP_JSX.jsx(DFL.Field, { label: "Status", description: resolutionMessage }) : null, config.fexRuntimeSupported ? (SP_JSX.jsx(SelectEdit, { label: "FEX Preset", value: fexValue, options: fexOptions, onChange: onSelectFex })) : (SP_JSX.jsx(DFL.Field, { label: "FEX presets unavailable", description: config.fexRuntimeReason || "The persistent Batocera launch helper could not be installed." })), config.fexRuntimeSupported && isCustom
                         ? fexKnobs.map((knob) => (SP_JSX.jsx(DFL.ToggleField, { label: knob.label, checked: fexConfig[knob.key] === "1", onChange: (value) => setKnob(knob.key, value) }, knob.key)))
-                        : null] }), config.fexRuntimeSupported ? (SP_JSX.jsxs(DFL.PanelSection, { title: "ADVANCED", children: [SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: () => setShowThunks((value) => !value), children: showThunks ? "Hide Host Thunks" : "Host Thunks" }), showThunks
-                        ? thunkModules.map((thunk) => (SP_JSX.jsx(DFL.ToggleField, { label: thunk.label, checked: thunks[thunk.module] !== false, onChange: (value) => setThunk(thunk.module, value) }, thunk.module)))
-                        : null] })) : null, !editingDefault ? (SP_JSX.jsx(DFL.PanelSection, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: resetGame, children: "Reset to Default" }) })) : (SP_JSX.jsx(DFL.PanelSection, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: resettingAll, onClick: confirmResetAllGames, children: resettingAll ? "Resetting..." : "Reset All Games" }) }))] }));
+                        : null] }), SP_JSX.jsxs(DFL.PanelSection, { title: "ADVANCED", children: [config.fexRuntimeSupported ? (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: () => setShowThunks((value) => !value), children: showThunks ? "Hide Host Thunks" : "Host Thunks" }), showThunks
+                                ? thunkModules.map((thunk) => (SP_JSX.jsx(DFL.ToggleField, { label: thunk.label, checked: thunks[thunk.module] !== false, onChange: (value) => setThunk(thunk.module, value) }, thunk.module)))
+                                : null] })) : null, SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: () => setShowEnv((value) => !value), children: showEnv ? "Hide Environment" : "Environment" }), showEnv ? SP_JSX.jsx("div", { className: "armada-advanced-group", children: envControls }) : null] }), !editingDefault ? (SP_JSX.jsx(DFL.PanelSection, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: resetGame, children: "Reset to Default" }) })) : (SP_JSX.jsx(DFL.PanelSection, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: resettingAll, onClick: confirmResetAllGames, children: resettingAll ? "Resetting..." : "Reset All Games" }) }))] }));
 }
 
 const DEFAULT_BRIGHTNESS = 70;
@@ -1701,6 +1759,7 @@ function Power({ config, setConfig }) {
         data: name,
         label: curve.label || titleCase(name),
     }));
+    const governorOptions = (config.cpuGovernors || []).map((name) => ({ data: name, label: titleCase(name) }));
     const setProfileValue = (name, value) => {
         setConfig((current) => (current ? update(current, ["power", "profiles", profile, name], value) : current));
     };
@@ -1726,10 +1785,22 @@ function Power({ config, setConfig }) {
             return;
         setConfig((current) => (current ? update(current, ["power", "profiles", profile], defaults) : current));
     };
+    const setCpuGovernor$1 = async (value) => {
+        const previous = config.cpuGovernor || "";
+        setConfig((current) => (current ? { ...current, cpuGovernor: value } : current));
+        try {
+            const applied = await setCpuGovernor(value);
+            setConfig((current) => (current ? { ...current, cpuGovernor: applied } : current));
+        }
+        catch (error) {
+            setConfig((current) => (current ? { ...current, cpuGovernor: previous } : current));
+            toaster.toast({ title: "Could not change CPU governor", body: String(error) });
+        }
+    };
     const underclockLevel = p.cpu_underclock || "";
     const supportsUnderclockPresets = !!config.power.underclocks?.[config.cpuDeviceClass];
-    return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [profilesSupported ? (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.PanelSection, { title: "EDIT POWER PROFILE", children: SP_JSX.jsx(SelectEdit, { value: profile, options: profiles, onChange: setProfile }) }), SP_JSX.jsxs(DFL.PanelSection, { title: "PROFILE SETTINGS", children: [SP_JSX.jsx(SelectEdit, { label: "Fan Curve", value: p.fan_curve, options: fanCurves, onChange: (v) => setProfileValue("fan_curve", v) }), supportsUnderclockPresets ? (SP_JSX.jsx(SelectEdit, { label: "CPU Underclock", value: underclockLevel, options: underclocks, onChange: (v) => setProfileValue("cpu_underclock", v) })) : (SP_JSX.jsx(SliderEdit, { label: "CPU Max (%)", value: Math.round(Number(p.cpu_max || 0) * 100), min: 35, max: 100, step: 1, onChange: (v) => setProfileValue("cpu_max", (v / 100).toFixed(2)) })), SP_JSX.jsx(SliderEdit, { label: "GPU Min (%)", value: Math.round(Number(p.gpu_min || 0) * 100), min: 0, max: 100, step: 1, onChange: (v) => setGpuValue("gpu_min", (v / 100).toFixed(2)) }), SP_JSX.jsx(SliderEdit, { label: "GPU Max (%)", value: Math.round(Number(p.gpu_max || 0) * 100), min: 35, max: 100, step: 1, onChange: (v) => setGpuValue("gpu_max", (v / 100).toFixed(2)) }), SP_JSX.jsx("div", { className: "armada-reset-row", children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: resetProfile, children: "Reset to Default" }) })] })] })) : (SP_JSX.jsx(DFL.PanelSection, { title: "Power profiles", children: SP_JSX.jsx(DFL.Field, { label: "Unavailable on this image", description: config.powerReason
-                        || "Per-profile CPU/GPU/fan-curve editing needs odin-power. Adaptive CPU and Fan controls below remain available." }) })), SP_JSX.jsx(AdaptiveCpu, { config: config, setConfig: setConfig }), SP_JSX.jsx(FanControl, { config: config, setConfig: setConfig })] }));
+    return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [profilesSupported ? (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.PanelSection, { title: "EDIT POWER PROFILE", children: SP_JSX.jsx(SelectEdit, { value: profile, options: profiles, onChange: setProfile }) }), SP_JSX.jsxs(DFL.PanelSection, { title: "PROFILE SETTINGS", children: [SP_JSX.jsx(SelectEdit, { label: "Fan Curve", value: p.fan_curve, options: fanCurves, onChange: (v) => setProfileValue("fan_curve", v) }), governorOptions.length ? (SP_JSX.jsx(SelectEdit, { label: "CPU Governor", value: p.cpu_governor || config.cpuGovernor || governorOptions[0].data, options: governorOptions, onChange: (v) => setProfileValue("cpu_governor", v) })) : null, supportsUnderclockPresets ? (SP_JSX.jsx(SelectEdit, { label: "CPU Underclock", value: underclockLevel, options: underclocks, onChange: (v) => setProfileValue("cpu_underclock", v) })) : (SP_JSX.jsx(SliderEdit, { label: "CPU Max (%)", value: Math.round(Number(p.cpu_max || 0) * 100), min: 35, max: 100, step: 1, onChange: (v) => setProfileValue("cpu_max", (v / 100).toFixed(2)) })), SP_JSX.jsx(SliderEdit, { label: "GPU Min (%)", value: Math.round(Number(p.gpu_min || 0) * 100), min: 0, max: 100, step: 1, onChange: (v) => setGpuValue("gpu_min", (v / 100).toFixed(2)) }), SP_JSX.jsx(SliderEdit, { label: "GPU Max (%)", value: Math.round(Number(p.gpu_max || 0) * 100), min: 35, max: 100, step: 1, onChange: (v) => setGpuValue("gpu_max", (v / 100).toFixed(2)) }), SP_JSX.jsx("div", { className: "armada-reset-row", children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: resetProfile, children: "Reset to Default" }) })] })] })) : (SP_JSX.jsx(DFL.PanelSection, { title: "Power profiles", children: SP_JSX.jsx(DFL.Field, { label: "Unavailable on this image", description: config.powerReason
+                        || "Per-profile CPU/GPU/fan-curve editing needs odin-power. Adaptive CPU and Fan controls below remain available." }) })), !profilesSupported && governorOptions.length ? (SP_JSX.jsxs(DFL.PanelSection, { title: "CPU governor", children: [SP_JSX.jsx(SelectEdit, { label: "Scaling governor", value: config.cpuGovernor || governorOptions[0].data, options: governorOptions, onChange: setCpuGovernor$1 }), SP_JSX.jsx(DFL.Field, { label: "Note", description: "Applies immediately via sysfs. Rear-paddle Cycle power walks the same governors." })] })) : null, SP_JSX.jsx(AdaptiveCpu, { config: config, setConfig: setConfig }), SP_JSX.jsx(FanControl, { config: config, setConfig: setConfig })] }));
 }
 
 const CAPTURE_CONTROLS = ["left_x", "left_y", "right_x", "right_y", "left_trigger", "right_trigger"];
@@ -1940,7 +2011,20 @@ function Settings({ config, setConfig }) {
             setConfig((current) => (current ? { ...current, controllerType: previous } : current));
         }
     };
-    return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsxs(DFL.PanelSection, { title: "Controller", children: [config.controllerSupported ? (SP_JSX.jsx(SelectEdit, { label: "Emulation", value: config.controllerType || "deck-uhid", options: config.controllerTypes || [], onChange: setControllerType$1 })) : (SP_JSX.jsx(DFL.Field, { label: "Controller emulation", description: "Managed by Batocera/evmapy on this image; Armada's InputPlumber selector is not installed." })), SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: openCalibration, children: "Launch Calibration" })] }), SP_JSX.jsxs(DFL.PanelSection, { title: "System", children: [SP_JSX.jsx(ToggleRow, { label: "Enable SSH", description: "Persists Batocera's Dropbear service setting.", value: !!config.sshEnabled, onChange: setSshEnabled$1 }), SP_JSX.jsx(DFL.Field, { label: "OS Version", description: config.osVersion || "unknown" }), (config.warnings || []).map((warning) => SP_JSX.jsx(DFL.Field, { label: "Plugin warning", description: warning }, warning))] })] }));
+    const setSleepMode$1 = async (value) => {
+        const previous = config.sleepMode || "";
+        setConfig((current) => (current ? { ...current, sleepMode: value } : current));
+        try {
+            const applied = await setSleepMode(value);
+            setConfig((current) => (current ? { ...current, sleepMode: applied } : current));
+        }
+        catch (error) {
+            setConfig((current) => (current ? { ...current, sleepMode: previous } : current));
+            toaster.toast({ title: "Could not change sleep mode", body: String(error) });
+        }
+    };
+    const sleepModes = config.sleepModes || [];
+    return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsxs(DFL.PanelSection, { title: "Controller", children: [config.controllerSupported ? (SP_JSX.jsx(SelectEdit, { label: "Emulation", value: config.controllerType || "deck-uhid", options: config.controllerTypes || [], onChange: setControllerType$1 })) : (SP_JSX.jsx(DFL.Field, { label: "Controller emulation", description: "Managed by Batocera/evmapy on this image; Armada's InputPlumber selector is not installed." })), SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: openCalibration, children: "Launch Calibration" })] }), SP_JSX.jsxs(DFL.PanelSection, { title: "System", children: [SP_JSX.jsx(ToggleRow, { label: "Enable SSH", description: "Persists Batocera's Dropbear service setting.", value: !!config.sshEnabled, onChange: setSshEnabled$1 }), sleepModes.length > 1 ? (SP_JSX.jsx(SelectEdit, { label: "Sleep Mode", value: config.sleepMode || sleepModes[0]?.data || "", options: sleepModes, onChange: setSleepMode$1 })) : null, SP_JSX.jsx(DFL.Field, { label: "OS Version", description: config.osVersion || "unknown" }), (config.warnings || []).map((warning) => SP_JSX.jsx(DFL.Field, { label: "Plugin warning", description: warning }, warning))] })] }));
 }
 
 function Content() {

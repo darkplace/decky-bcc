@@ -83,6 +83,7 @@ export interface Tweaks {
 export interface InstalledGame {
   appid: string;
   name: string;
+  nonSteam?: boolean;
 }
 
 export interface EmulationChoice {
@@ -153,6 +154,7 @@ export interface CalibrationState {
 export interface GameRef {
   appid: string;
   name: string;
+  nonSteam?: boolean;
 }
 
 export interface JoystickLedSide {
@@ -277,6 +279,10 @@ export interface Config {
   cpuDeviceClass: string;
   osVersion: string;
   sshEnabled: boolean;
+  sleepMode?: string;
+  sleepModes?: DropdownChoice[];
+  cpuGovernor?: string;
+  cpuGovernors?: string[];
   controllerSupported: boolean;
   controllerType: string;
   controllerTypes: DropdownChoice[];

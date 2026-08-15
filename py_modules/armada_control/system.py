@@ -303,3 +303,72 @@ def set_ssh_enabled(enabled):
         if not result or result.returncode != 0:
             raise RuntimeError("failed to update sshd")
     return ssh_enabled()
+
+
+MEM_SLEEP_PATH = Path("/sys/power/mem_sleep")
+CPUFREQ_GOVERNOR = Path("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor")
+CPUFREQ_AVAILABLE = Path("/sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors")
+CPUFREQ_ROOT = Path("/sys/devices/system/cpu")
+SLEEP_MODE_LABELS = {
+    "s2idle": "s2idle (shallow)",
+    "deep": "Deep",
+}
+PLUGIN_SLEEP_PREF = Path("/userdata/system/configs/batocera-control/sleep-mode.conf")
+
+
+def sleep_modes() -> list[dict[str, str]]:
+    advertised = {word.strip("[]") for word in read_text(MEM_SLEEP_PATH).split()}
+    return [
+        {"data": mode, "label": SLEEP_MODE_LABELS.get(mode, mode)}
+        for mode in ("s2idle", "deep")
+        if mode in advertised
+    ]
+
+
+def sleep_mode() -> str:
+    raw = read_text(MEM_SLEEP_PATH)
+    for word in raw.split():
+        if word.startswith("[") and word.endswith("]"):
+            return word.strip("[]")
+    parts = raw.split()
+    return parts[0] if parts else ""
+
+
+def set_sleep_mode(value: str) -> str:
+    mode = str(value or "").strip()
+    allowed = {item["data"] for item in sleep_modes()}
+    if mode not in allowed:
+        raise ValueError(f"unsupported sleep mode: {mode}")
+    try:
+        MEM_SLEEP_PATH.write_text(f"{mode}\n", encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError(f"failed to set sleep mode: {exc}") from exc
+    try:
+        PLUGIN_SLEEP_PREF.parent.mkdir(parents=True, exist_ok=True)
+        PLUGIN_SLEEP_PREF.write_text(f"{mode}\n", encoding="utf-8")
+    except OSError:
+        pass
+    return sleep_mode()
+
+
+def cpu_governors() -> list[str]:
+    # userspace requires a scaling_setspeed writer Batocera does not provide.
+    return [name for name in read_text(CPUFREQ_AVAILABLE).split() if name and name != "userspace"]
+
+
+def cpu_governor() -> str:
+    return read_text(CPUFREQ_GOVERNOR).strip()
+
+
+def set_cpu_governor(value: str) -> str:
+    name = str(value or "").strip()
+    allowed = cpu_governors()
+    if name not in allowed:
+        raise ValueError(f"unsupported CPU governor: {name}")
+    for cpu in CPUFREQ_ROOT.glob("cpu[0-9]*"):
+        target = cpu / "cpufreq" / "scaling_governor"
+        try:
+            target.write_text(f"{name}\n", encoding="utf-8")
+        except OSError:
+            continue
+    return cpu_governor()

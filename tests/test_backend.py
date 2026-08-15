@@ -14,7 +14,7 @@ from unittest import mock
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLUGIN_ROOT / "py_modules"))
 
-from armada_control import back_paddles, calibration, cpu_limit, emulation_broker as emulation, fan_control, joystick_led, lsfg, paddle_actions, paddle_daemon, power, runtime, system  # noqa: E402
+from armada_control import back_paddles, calibration, cpu_limit, emulation_broker as emulation, fan_control, joystick_led, lsfg, paddle_actions, paddle_daemon, power, runtime, steam, system  # noqa: E402
 
 
 class JoystickLedTests(unittest.TestCase):
@@ -616,6 +616,88 @@ class PaddleActionTests(unittest.TestCase):
                 paddle_actions.run_action("fan_mode_cycle")
             self.assertEqual(commands[0][0], str(qcom))
             self.assertIn(commands[0][1], {"silent", "auto", "aggressive", "set", "stop"})
+
+
+class SteamShortcutTests(unittest.TestCase):
+    def test_binary_vdf_shortcuts_are_listed_as_non_steam(self):
+        def cstring(text: str) -> bytes:
+            return text.encode("utf-8") + b"\0"
+
+        # shortcuts -> { "0": { appid: 42, AppName: "Demo" } }
+        inner = (
+            b"\x02" + cstring("appid") + (42).to_bytes(4, "little", signed=True)
+            + b"\x01" + cstring("AppName") + cstring("Demo NonSteam")
+            + b"\x08"
+        )
+        shortcuts = b"\x00" + cstring("0") + inner + b"\x08"
+        payload = b"\x00" + cstring("shortcuts") + shortcuts + b"\x08"
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            shortcuts_path = root / "userdata" / "1" / "config" / "shortcuts.vdf"
+            shortcuts_path.parent.mkdir(parents=True)
+            shortcuts_path.write_bytes(payload)
+            with mock.patch.object(steam, "_steam_roots", return_value=[root]):
+                games = steam.installed_games()
+
+        self.assertEqual(games, [{"appid": "42", "name": "Demo NonSteam", "nonSteam": True}])
+
+
+class SleepAndGovernorTests(unittest.TestCase):
+    def test_sleep_modes_and_set_from_sysfs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            mem = root / "mem_sleep"
+            pref = root / "sleep-mode.conf"
+            mem.write_text("s2idle [deep]\n", encoding="utf-8")
+            with (
+                mock.patch.object(system, "MEM_SLEEP_PATH", mem),
+                mock.patch.object(system, "PLUGIN_SLEEP_PREF", pref),
+            ):
+                modes = {item["data"] for item in system.sleep_modes()}
+                self.assertEqual(modes, {"s2idle", "deep"})
+                self.assertEqual(system.sleep_mode(), "deep")
+                self.assertEqual(system.set_sleep_mode("s2idle"), "s2idle")
+                self.assertEqual(mem.read_text(encoding="utf-8").strip(), "s2idle")
+                self.assertEqual(pref.read_text(encoding="utf-8").strip(), "s2idle")
+
+    def test_cpu_governor_rejects_userspace_and_writes_all_cpus(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cpu0 = root / "cpu0" / "cpufreq"
+            cpu1 = root / "cpu1" / "cpufreq"
+            cpu0.mkdir(parents=True)
+            cpu1.mkdir(parents=True)
+            (cpu0 / "scaling_available_governors").write_text("ondemand powersave userspace performance\n", encoding="utf-8")
+            (cpu0 / "scaling_governor").write_text("ondemand\n", encoding="utf-8")
+            (cpu1 / "scaling_governor").write_text("ondemand\n", encoding="utf-8")
+            with (
+                mock.patch.object(system, "CPUFREQ_ROOT", root),
+                mock.patch.object(system, "CPUFREQ_AVAILABLE", cpu0 / "scaling_available_governors"),
+                mock.patch.object(system, "CPUFREQ_GOVERNOR", cpu0 / "scaling_governor"),
+            ):
+                self.assertEqual(system.cpu_governors(), ["ondemand", "powersave", "performance"])
+                self.assertEqual(system.set_cpu_governor("performance"), "performance")
+                self.assertEqual((cpu1 / "scaling_governor").read_text(encoding="utf-8").strip(), "performance")
+                with self.assertRaises(ValueError):
+                    system.set_cpu_governor("userspace")
+
+
+class LaunchEnvMergeTests(unittest.TestCase):
+    def test_merged_env_applies_tombstones(self):
+        import importlib.machinery
+        import importlib.util
+
+        path = PLUGIN_ROOT / "py_modules" / "batocera-control-game-launch"
+        loader = importlib.machinery.SourceFileLoader("batocera_control_game_launch", str(path))
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        module = importlib.util.module_from_spec(spec)
+        loader.exec_module(module)
+        tweaks = {
+            "global": {"env": {"FOO": "1", "BAR": "2"}},
+            "games": {"123": {"env": {"BAR": None, "BAZ": "3"}}},
+        }
+        self.assertEqual(module.merged_env(tweaks, "123"), {"FOO": "1", "BAZ": "3"})
 
 
 class PersistentRuntimeTests(unittest.TestCase):

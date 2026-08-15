@@ -66,6 +66,16 @@ class Plugin:
 
         return await asyncio.to_thread(set_ssh_enabled, enabled)
 
+    async def set_sleep_mode(self, value):
+        from armada_control.system import set_sleep_mode
+
+        return await asyncio.to_thread(set_sleep_mode, value)
+
+    async def set_cpu_governor(self, value):
+        from armada_control.system import set_cpu_governor
+
+        return await asyncio.to_thread(set_cpu_governor, value)
+
     async def set_controller_type(self, value):
         return await asyncio.to_thread(set_controller_type, value)
 

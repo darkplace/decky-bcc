@@ -3,14 +3,19 @@ import type { Config, DropdownChoice, GameRef } from "../types";
 
 export function gameDisplayName(game: GameRef | null | undefined): string {
   if (!game?.appid) return "";
-  return game.name || `App ${game.appid}`;
+  const base = game.name || `App ${game.appid}`;
+  return game.nonSteam ? `${base} (Non-Steam)` : base;
 }
 
 export function availableGames(config: Config): GameRef[] {
   const games = new Map<string, GameRef>();
   for (const game of config.installedGames || []) {
     if (game?.appid) {
-      games.set(String(game.appid), { appid: String(game.appid), name: game.name || `App ${game.appid}` });
+      games.set(String(game.appid), {
+        appid: String(game.appid),
+        name: game.name || `App ${game.appid}`,
+        nonSteam: !!game.nonSteam,
+      });
     }
   }
   for (const [appid, settings] of Object.entries(config.tweaks?.games || {})) {

@@ -1,6 +1,11 @@
+import { toaster } from "@decky/api";
 import { ButtonItem, Field, PanelSection } from "@decky/ui";
 import type { Dispatch, SetStateAction } from "react";
-import { setControllerType as applyControllerType, setSshEnabled as applySshEnabled } from "../backend";
+import {
+  setControllerType as applyControllerType,
+  setSleepMode as applySleepMode,
+  setSshEnabled as applySshEnabled,
+} from "../backend";
 import { openCalibration } from "../components/Calibration";
 import { SelectEdit, ToggleRow } from "../components/widgets";
 import type { Config } from "../types";
@@ -31,6 +36,18 @@ export function Settings({ config, setConfig }: {
       setConfig((current) => (current ? { ...current, controllerType: previous } : current));
     }
   };
+  const setSleepMode = async (value: string) => {
+    const previous = config.sleepMode || "";
+    setConfig((current) => (current ? { ...current, sleepMode: value } : current));
+    try {
+      const applied = await applySleepMode(value);
+      setConfig((current) => (current ? { ...current, sleepMode: applied } : current));
+    } catch (error) {
+      setConfig((current) => (current ? { ...current, sleepMode: previous } : current));
+      toaster.toast({ title: "Could not change sleep mode", body: String(error) });
+    }
+  };
+  const sleepModes = config.sleepModes || [];
   return (
     <>
       <PanelSection title="Controller">
@@ -48,6 +65,14 @@ export function Settings({ config, setConfig }: {
       </PanelSection>
       <PanelSection title="System">
         <ToggleRow label="Enable SSH" description="Persists Batocera's Dropbear service setting." value={!!config.sshEnabled} onChange={setSshEnabled} />
+        {sleepModes.length > 1 ? (
+          <SelectEdit
+            label="Sleep Mode"
+            value={config.sleepMode || sleepModes[0]?.data || ""}
+            options={sleepModes}
+            onChange={setSleepMode}
+          />
+        ) : null}
         <Field label="OS Version" description={config.osVersion || "unknown"} />
         {(config.warnings || []).map((warning) => <Field key={warning} label="Plugin warning" description={warning} />)}
       </PanelSection>

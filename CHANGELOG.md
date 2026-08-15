@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.15 - 2026-08-15
+
+- List Non-Steam / `shortcuts.vdf` titles in Compatibility (binary VDF parser).
+- Add Environment variable editor (global + per-game, with inherit/tombstone)
+  and apply those variables from `batocera-control-game-launch` on next launch.
+- Expose stock CPU governor control on the Power tab when `odin-power` profiles
+  are absent; persist governor choice via sysfs.
+- Add Sleep Mode (s2idle/deep) to Settings when `/sys/power/mem_sleep` advertises
+  more than one mode.
+
 ## 0.2.14 - 2026-08-15
 
 - Drive paddle MangoHud toggle through stock `mangohudctl toggle no_display`

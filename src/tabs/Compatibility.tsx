@@ -4,8 +4,10 @@ import {
   DialogButton,
   DialogFooter,
   Field,
+  Focusable,
   ModalRoot,
   PanelSection,
+  TextField,
   ToggleField,
   showModal,
 } from "@decky/ui";
@@ -78,6 +80,58 @@ function ConfirmResetAllModal({ closeModal, onConfirm }: { closeModal?: () => vo
   );
 }
 
+function EnvVarModal({
+  closeModal,
+  initialKey,
+  initialValue,
+  onSave,
+  onDelete,
+}: {
+  closeModal?: () => void;
+  initialKey: string;
+  initialValue: string;
+  onSave: (key: string, value: string) => void;
+  onDelete?: () => void;
+}) {
+  const [key, setKey] = useState(initialKey);
+  const [value, setValue] = useState(initialValue);
+  const [nameError, setNameError] = useState("");
+  const save = () => {
+    const name = key.trim();
+    if (!name || name.includes("=") || name.includes("\0")) {
+      setNameError("Invalid name: must be non-empty, no '='");
+      return;
+    }
+    onSave(name, value);
+    closeModal?.();
+  };
+  return (
+    <ModalRoot onCancel={closeModal}>
+      <DialogBody>
+        <TextField label="Name" value={key} onChange={(event) => setKey(event.target.value)} />
+        {nameError ? <Field description={nameError} /> : null}
+        <TextField label="Value" value={value} onChange={(event) => setValue(event.target.value)} />
+      </DialogBody>
+      <DialogFooter>
+        <Focusable style={{ display: "flex", flexDirection: "row", gap: "8px", width: "100%" }}>
+          <DialogButton onClick={save}>Save</DialogButton>
+          {onDelete ? (
+            <DialogButton
+              onClick={() => {
+                onDelete();
+                closeModal?.();
+              }}
+            >
+              Delete
+            </DialogButton>
+          ) : null}
+          <DialogButton onClick={closeModal}>Cancel</DialogButton>
+        </Focusable>
+      </DialogFooter>
+    </ModalRoot>
+  );
+}
+
 export function Compatibility({ config, setConfig }: { config: Config; setConfig: Dispatch<SetStateAction<Config | null>> }) {
   const [resolution, setResolution] = useState("Default");
   const [defaultResolution, setDefaultResolution] = useState(getGlobalResolution());
@@ -85,6 +139,7 @@ export function Compatibility({ config, setConfig }: { config: Config; setConfig
   const [resettingAll, setResettingAll] = useState(false);
   const [customSelected, setCustomSelected] = useState(false);
   const [showThunks, setShowThunks] = useState(false);
+  const [showEnv, setShowEnv] = useState(false);
   const [compatTools, setCompatTools] = useState<CompatTool[]>([]);
   const [perGameTools, setPerGameTools] = useState<CompatTool[]>([]);
   const [currentTool, setCurrentTool] = useState("");
@@ -297,7 +352,11 @@ export function Compatibility({ config, setConfig }: { config: Config; setConfig
     setGlobalTool(name);
     setWindowsCompatTool(name);
     patchSettings({ windowsCompatTool: name });
-    await migrateWindowsCompatTool(config.installedGames.map((installed) => installed.appid), oldTool, name);
+    await migrateWindowsCompatTool(
+      config.installedGames.filter((installed) => !installed.nonSteam).map((installed) => installed.appid),
+      oldTool,
+      name,
+    );
     persistHandledGames();
   };
   const selectableTools = new Map<string, CompatTool>();
@@ -352,6 +411,66 @@ export function Compatibility({ config, setConfig }: { config: Config; setConfig
   const thunks: Record<string, boolean> = values.thunks || {};
   const setThunk = (module: string, on: boolean) => patchSettings({ thunks: { ...thunks, [module]: on } });
 
+  // env merges per-entry; unchecking a default var stores a null tombstone
+  const ownEnv = ((editingDefault ? tweaks.global.env : gameSettings.env) || {}) as Record<string, string | null>;
+  const globalEnv = ((!editingDefault && tweaks.global.env) || {}) as Record<string, string>;
+  const patchOwnEnv = (mutate: (next: Record<string, string | null>) => void) => {
+    const next = { ...ownEnv };
+    mutate(next);
+    patchSettings({ env: Object.keys(next).length ? next : undefined });
+  };
+  const saveEnvVar = (oldKey: string | null, key: string, value: string) => {
+    patchOwnEnv((next) => {
+      if (oldKey && oldKey !== key) delete next[oldKey];
+      next[key] = value;
+    });
+  };
+  const deleteEnvVar = (key: string) => {
+    patchOwnEnv((next) => {
+      delete next[key];
+    });
+  };
+  const openEnvVar = (key: string | null) => {
+    showModal(
+      <EnvVarModal
+        initialKey={key || ""}
+        initialValue={key ? String(ownEnv[key] ?? "") : ""}
+        onSave={(nextKey, nextValue) => saveEnvVar(key, nextKey, nextValue)}
+        onDelete={key ? () => deleteEnvVar(key) : undefined}
+      />,
+    );
+  };
+  const inheritedEnvEntries = Object.entries(globalEnv).filter(([key]) => typeof ownEnv[key] !== "string");
+  const ownEnvEntries = Object.entries(ownEnv).filter(([, value]) => typeof value === "string") as [string, string][];
+  const envControls = (
+    <>
+      {inheritedEnvEntries.length ? <div className="armada-subheader">Default Variables</div> : null}
+      {inheritedEnvEntries.map(([key, value]) => (
+        <ToggleField
+          key={key}
+          label={String(value) ? `${key}=${String(value)}` : key}
+          checked={ownEnv[key] !== null}
+          onChange={(on) => patchOwnEnv((next) => {
+            if (on) delete next[key];
+            else next[key] = null;
+          })}
+        />
+      ))}
+      {inheritedEnvEntries.length ? <div className="armada-subheader">Per-Game Variables</div> : null}
+      {ownEnvEntries.map(([key, value]) => (
+        <ButtonItem key={key} layout="below" onClick={() => openEnvVar(key)}>
+          <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "left" }}>
+            {value ? `${key}=${value}` : key}
+          </div>
+        </ButtonItem>
+      ))}
+      <ButtonItem layout="below" onClick={() => openEnvVar(null)}>
+        + Add Variable
+      </ButtonItem>
+      <Field label="Applies on next launch" description="Variables are injected by batocera-control-game-launch before the game starts." />
+    </>
+  );
+
   return (
     <>
       <PanelSection title="EDIT GAME PROFILE">
@@ -390,18 +509,24 @@ export function Compatibility({ config, setConfig }: { config: Config; setConfig
             ))
           : null}
       </PanelSection>
-      {config.fexRuntimeSupported ? (
-        <PanelSection title="ADVANCED">
-          <ButtonItem layout="below" onClick={() => setShowThunks((value) => !value)}>
-            {showThunks ? "Hide Host Thunks" : "Host Thunks"}
+      <PanelSection title="ADVANCED">
+          {config.fexRuntimeSupported ? (
+            <>
+              <ButtonItem layout="below" onClick={() => setShowThunks((value) => !value)}>
+                {showThunks ? "Hide Host Thunks" : "Host Thunks"}
+              </ButtonItem>
+              {showThunks
+                ? thunkModules.map((thunk) => (
+                    <ToggleField key={thunk.module} label={thunk.label} checked={thunks[thunk.module] !== false} onChange={(value) => setThunk(thunk.module, value)} />
+                  ))
+                : null}
+            </>
+          ) : null}
+          <ButtonItem layout="below" onClick={() => setShowEnv((value) => !value)}>
+            {showEnv ? "Hide Environment" : "Environment"}
           </ButtonItem>
-          {showThunks
-            ? thunkModules.map((thunk) => (
-                <ToggleField key={thunk.module} label={thunk.label} checked={thunks[thunk.module] !== false} onChange={(value) => setThunk(thunk.module, value)} />
-              ))
-            : null}
+          {showEnv ? <div className="armada-advanced-group">{envControls}</div> : null}
         </PanelSection>
-      ) : null}
       {!editingDefault ? (
         <PanelSection>
           <ButtonItem layout="below" onClick={resetGame}>

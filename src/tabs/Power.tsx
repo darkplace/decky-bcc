@@ -1,6 +1,8 @@
+import { toaster } from "@decky/api";
 import { ButtonItem, Field, PanelSection } from "@decky/ui";
 import { useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
+import { setCpuGovernor as applyCpuGovernor } from "../backend";
 import { SelectEdit, SliderEdit } from "../components/widgets";
 import { clone, titleCase, update } from "../lib/util";
 import type { Config, PowerProfile } from "../types";
@@ -26,6 +28,7 @@ export function Power({ config, setConfig }: { config: Config; setConfig: Dispat
     data: name,
     label: curve.label || titleCase(name),
   }));
+  const governorOptions = (config.cpuGovernors || []).map((name) => ({ data: name, label: titleCase(name) }));
   const setProfileValue = (name: string, value: any) => {
     setConfig((current) => (current ? update(current, ["power", "profiles", profile, name], value) : current));
   };
@@ -49,6 +52,17 @@ export function Power({ config, setConfig }: { config: Config; setConfig: Dispat
     if (!defaults) return;
     setConfig((current) => (current ? update(current, ["power", "profiles", profile], defaults) : current));
   };
+  const setCpuGovernor = async (value: string) => {
+    const previous = config.cpuGovernor || "";
+    setConfig((current) => (current ? { ...current, cpuGovernor: value } : current));
+    try {
+      const applied = await applyCpuGovernor(value);
+      setConfig((current) => (current ? { ...current, cpuGovernor: applied } : current));
+    } catch (error) {
+      setConfig((current) => (current ? { ...current, cpuGovernor: previous } : current));
+      toaster.toast({ title: "Could not change CPU governor", body: String(error) });
+    }
+  };
   const underclockLevel = p.cpu_underclock || "";
   const supportsUnderclockPresets = !!config.power.underclocks?.[config.cpuDeviceClass];
   return (
@@ -60,6 +74,14 @@ export function Power({ config, setConfig }: { config: Config; setConfig: Dispat
           </PanelSection>
           <PanelSection title="PROFILE SETTINGS">
             <SelectEdit label="Fan Curve" value={p.fan_curve} options={fanCurves} onChange={(v) => setProfileValue("fan_curve", v)} />
+            {governorOptions.length ? (
+              <SelectEdit
+                label="CPU Governor"
+                value={p.cpu_governor || config.cpuGovernor || governorOptions[0].data}
+                options={governorOptions}
+                onChange={(v) => setProfileValue("cpu_governor", v)}
+              />
+            ) : null}
             {supportsUnderclockPresets ? (
               <SelectEdit label="CPU Underclock" value={underclockLevel} options={underclocks} onChange={(v) => setProfileValue("cpu_underclock", v)} />
             ) : (
@@ -83,6 +105,17 @@ export function Power({ config, setConfig }: { config: Config; setConfig: Dispat
           />
         </PanelSection>
       )}
+      {!profilesSupported && governorOptions.length ? (
+        <PanelSection title="CPU governor">
+          <SelectEdit
+            label="Scaling governor"
+            value={config.cpuGovernor || governorOptions[0].data}
+            options={governorOptions}
+            onChange={setCpuGovernor}
+          />
+          <Field label="Note" description="Applies immediately via sysfs. Rear-paddle Cycle power walks the same governors." />
+        </PanelSection>
+      ) : null}
       <AdaptiveCpu config={config} setConfig={setConfig} />
       <FanControl config={config} setConfig={setConfig} />
     </>

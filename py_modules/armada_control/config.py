@@ -15,7 +15,7 @@ from .power import (
 )
 from .runtime import ensure_runtime
 from .steam import installed_games
-from .system import cpu_device_class, os_version, ssh_enabled
+from .system import cpu_device_class, cpu_governor, cpu_governors, os_version, sleep_mode, sleep_modes, ssh_enabled
 from .tweaks import fex_profile_labels, load_fex_contract, load_tweaks
 
 _POWER_STUB = {
@@ -125,6 +125,10 @@ def build_config(include_games=True):
         "cpuDeviceClass": _safe("Device class", cpu_device_class, "UNKNOWN", warnings),
         "osVersion": _safe("OS version", os_version, "batocera", warnings),
         "sshEnabled": _safe("SSH status", ssh_enabled, False, warnings),
+        "sleepMode": _safe("Sleep mode", sleep_mode, "", warnings),
+        "sleepModes": _safe("Sleep modes", sleep_modes, [], warnings),
+        "cpuGovernor": _safe("CPU governor", cpu_governor, "", warnings),
+        "cpuGovernors": _safe("CPU governors", cpu_governors, [], warnings),
         "controllerSupported": controller_supported(),
         "controllerType": _safe("Controller mode", controller_type, "deck-uhid", warnings),
         "controllerTypes": [{"data": key, "label": label} for key, label in CONTROLLER_TYPES.items()],
