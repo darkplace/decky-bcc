@@ -22,6 +22,11 @@ export const saveCompatApplied = (appids: string[]) => {
 export const setSshEnabled = (enabled: boolean) => call<[boolean], boolean>("set_ssh_enabled", enabled);
 export const setSleepMode = (value: string) => call<[string], string>("set_sleep_mode", value);
 export const setCpuGovernor = (value: string) => call<[string], string>("set_cpu_governor", value);
+export const reapplyPerf = (appid?: string | null) =>
+  call<[string | null | undefined], { pids: number; pid: number; appid: string; applied: Record<string, unknown> }>(
+    "reapply_perf",
+    appid,
+  );
 export const setControllerType = (value: string) => call<[string], string>("set_controller_type", value);
 export const getControllerState = () => call<[], CalibrationState>("get_controller_state");
 export const saveCalibration = (capture: Capture) => call<[Capture], CalibrationState>("save_calibration", capture);

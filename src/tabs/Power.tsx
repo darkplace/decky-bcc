@@ -19,16 +19,22 @@ const underclocks = [
 export function Power({ config, setConfig }: { config: Config; setConfig: Dispatch<SetStateAction<Config | null>> }) {
   const [profile, setProfile] = useState(config.power.general.default_profile || "balanced");
   const profilesSupported = config.powerSupported && !!Object.keys(config.power.profiles || {}).length;
+  const stockBackend = config.powerBackend === "stock";
   const p = config.power.profiles[profile] || ({} as PowerProfile);
-  const profiles = Object.entries(config.power.profiles || {}).map(([name, profile]) => ({
+  const profiles = Object.entries(config.power.profiles || {}).map(([name, entry]) => ({
     data: name,
-    label: profile.label || titleCase(name),
+    label: entry.label || titleCase(name),
   }));
   const fanCurves = Object.entries(config.power.fan_curves || {}).map(([name, curve]) => ({
     data: name,
     label: curve.label || titleCase(name),
   }));
   const governorOptions = (config.cpuGovernors || []).map((name) => ({ data: name, label: titleCase(name) }));
+  const selectProfile = (name: any) => {
+    const next = String(name);
+    setProfile(next);
+    setConfig((current) => (current ? update(current, ["power", "general", "default_profile"], next) : current));
+  };
   const setProfileValue = (name: string, value: any) => {
     setConfig((current) => (current ? update(current, ["power", "profiles", profile, name], value) : current));
   };
@@ -70,7 +76,13 @@ export function Power({ config, setConfig }: { config: Config; setConfig: Dispat
       {profilesSupported ? (
         <>
           <PanelSection title="EDIT POWER PROFILE">
-            <SelectEdit value={profile} options={profiles} onChange={setProfile} />
+            <SelectEdit value={profile} options={profiles} onChange={selectProfile} />
+            {stockBackend ? (
+              <Field
+                label="Stock backend"
+                description="Applies CPU governor + qcom-fan for the selected profile. CPU%/GPU% limits are kept for odin-power images and are not written to hardware here."
+              />
+            ) : null}
           </PanelSection>
           <PanelSection title="PROFILE SETTINGS">
             <SelectEdit label="Fan Curve" value={p.fan_curve} options={fanCurves} onChange={(v) => setProfileValue("fan_curve", v)} />
@@ -82,13 +94,18 @@ export function Power({ config, setConfig }: { config: Config; setConfig: Dispat
                 onChange={(v) => setProfileValue("cpu_governor", v)}
               />
             ) : null}
-            {supportsUnderclockPresets ? (
+            {!stockBackend && supportsUnderclockPresets ? (
               <SelectEdit label="CPU Underclock" value={underclockLevel} options={underclocks} onChange={(v) => setProfileValue("cpu_underclock", v)} />
-            ) : (
+            ) : null}
+            {!stockBackend && !supportsUnderclockPresets ? (
               <SliderEdit label="CPU Max (%)" value={Math.round(Number(p.cpu_max || 0) * 100)} min={35} max={100} step={1} onChange={(v) => setProfileValue("cpu_max", (v / 100).toFixed(2))} />
-            )}
-            <SliderEdit label="GPU Min (%)" value={Math.round(Number(p.gpu_min || 0) * 100)} min={0} max={100} step={1} onChange={(v) => setGpuValue("gpu_min", (v / 100).toFixed(2))} />
-            <SliderEdit label="GPU Max (%)" value={Math.round(Number(p.gpu_max || 0) * 100)} min={35} max={100} step={1} onChange={(v) => setGpuValue("gpu_max", (v / 100).toFixed(2))} />
+            ) : null}
+            {!stockBackend ? (
+              <>
+                <SliderEdit label="GPU Min (%)" value={Math.round(Number(p.gpu_min || 0) * 100)} min={0} max={100} step={1} onChange={(v) => setGpuValue("gpu_min", (v / 100).toFixed(2))} />
+                <SliderEdit label="GPU Max (%)" value={Math.round(Number(p.gpu_max || 0) * 100)} min={35} max={100} step={1} onChange={(v) => setGpuValue("gpu_max", (v / 100).toFixed(2))} />
+              </>
+            ) : null}
             <div className="armada-reset-row">
               <ButtonItem layout="below" onClick={resetProfile}>Reset to Default</ButtonItem>
             </div>
@@ -100,7 +117,7 @@ export function Power({ config, setConfig }: { config: Config; setConfig: Dispat
             label="Unavailable on this image"
             description={
               config.powerReason
-              || "Per-profile CPU/GPU/fan-curve editing needs odin-power. Adaptive CPU and Fan controls below remain available."
+              || "Per-profile CPU/GPU/fan-curve editing needs odin-power or stock qcom-fan. Adaptive CPU and Fan controls below remain available."
             }
           />
         </PanelSection>

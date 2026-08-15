@@ -13,8 +13,9 @@ import {
 } from "@decky/ui";
 import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { saveCompatApplied } from "../backend";
-import { SelectEdit } from "../components/widgets";
+import { toaster } from "@decky/api";
+import { reapplyPerf, saveCompatApplied } from "../backend";
+import { SelectEdit, SliderEdit } from "../components/widgets";
 import { getGlobalResolution, setGlobalResolution } from "../lib/steamSettings";
 import { clone } from "../lib/util";
 import { availableGames, editTargetOptions } from "../lib/games";
@@ -60,6 +61,11 @@ const thunkModules = [
   { module: "asound", label: "Host ALSA" },
   { module: "drm", label: "Host DRM" },
   { module: "WaylandClient", label: "Host Wayland" },
+];
+const corePresetOptions = [
+  { data: "", label: "System default" },
+  { data: "all", label: "All CPUs" },
+  { data: "custom", label: "Custom cpulist" },
 ];
 
 function ConfirmResetAllModal({ closeModal, onConfirm }: { closeModal?: () => void; onConfirm: () => void }) {
@@ -140,6 +146,9 @@ export function Compatibility({ config, setConfig }: { config: Config; setConfig
   const [customSelected, setCustomSelected] = useState(false);
   const [showThunks, setShowThunks] = useState(false);
   const [showEnv, setShowEnv] = useState(false);
+  const [showPerf, setShowPerf] = useState(false);
+  const [reapplying, setReapplying] = useState(false);
+  const [customCores, setCustomCores] = useState("");
   const [compatTools, setCompatTools] = useState<CompatTool[]>([]);
   const [perGameTools, setPerGameTools] = useState<CompatTool[]>([]);
   const [currentTool, setCurrentTool] = useState("");
@@ -471,6 +480,83 @@ export function Compatibility({ config, setConfig }: { config: Config; setConfig
     </>
   );
 
+  const niceEnabled = typeof values.nice === "number";
+  const niceValue = niceEnabled ? Number(values.nice) : 0;
+  const storedCores = values.cores;
+  const coresPreset =
+    storedCores === undefined || storedCores === null || storedCores === ""
+      ? ""
+      : storedCores === "all"
+        ? "all"
+        : "custom";
+  useEffect(() => {
+    if (coresPreset === "custom" && typeof storedCores === "string" && storedCores !== "all") {
+      setCustomCores(storedCores);
+    } else if (coresPreset !== "custom") {
+      setCustomCores("");
+    }
+  }, [game?.appid, coresPreset, typeof storedCores === "string" ? storedCores : ""]);
+  const setNiceEnabled = (on: boolean) => {
+    if (on) patchSettings({ nice: 0 });
+    else patchSettings({ nice: undefined });
+  };
+  const setCoresPreset = (choice: any) => {
+    const next = String(choice);
+    if (next === "") patchSettings({ cores: undefined });
+    else if (next === "all") patchSettings({ cores: "all" });
+    else patchSettings({ cores: customCores || "0" });
+  };
+  const onReapply = async () => {
+    if (reapplying) return;
+    setReapplying(true);
+    try {
+      const result = await reapplyPerf(game?.appid || null);
+      toaster.toast({
+        title: "Performance re-applied",
+        body: `Touched ${result.pids} thread(s) on pid ${result.pid}`,
+      });
+    } catch (error) {
+      toaster.toast({ title: "Could not re-apply", body: String(error) });
+    } finally {
+      setReapplying(false);
+    }
+  };
+  const perfControls = (
+    <>
+      <ToggleField label="Override nice" checked={niceEnabled} onChange={setNiceEnabled} />
+      {niceEnabled ? (
+        <SliderEdit
+          label="Nice"
+          value={niceValue}
+          min={-20}
+          max={19}
+          step={1}
+          format={(value) => String(Math.round(value))}
+          onChange={(value) => patchSettings({ nice: Math.round(value) })}
+        />
+      ) : null}
+      <SelectEdit label="CPU affinity" value={coresPreset} options={corePresetOptions} onChange={setCoresPreset} />
+      {coresPreset === "custom" ? (
+        <TextField
+          label="cpulist"
+          value={customCores}
+          onChange={(event) => {
+            const next = event.target.value;
+            setCustomCores(next);
+            patchSettings({ cores: next.trim() || undefined });
+          }}
+        />
+      ) : null}
+      <Field
+        label="Applies on next launch"
+        description="batocera-control-game-launch sets nice/affinity fail-open before exec. Re-apply can update a live SteamLaunch tree."
+      />
+      <ButtonItem layout="below" disabled={reapplying} onClick={() => { void onReapply(); }}>
+        {reapplying ? "Re-applying..." : "Re-apply to running game"}
+      </ButtonItem>
+    </>
+  );
+
   return (
     <>
       <PanelSection title="EDIT GAME PROFILE">
@@ -526,6 +612,10 @@ export function Compatibility({ config, setConfig }: { config: Config; setConfig
             {showEnv ? "Hide Environment" : "Environment"}
           </ButtonItem>
           {showEnv ? <div className="armada-advanced-group">{envControls}</div> : null}
+          <ButtonItem layout="below" onClick={() => setShowPerf((value) => !value)}>
+            {showPerf ? "Hide Performance" : "Performance"}
+          </ButtonItem>
+          {showPerf ? <div className="armada-advanced-group">{perfControls}</div> : null}
         </PanelSection>
       {!editingDefault ? (
         <PanelSection>

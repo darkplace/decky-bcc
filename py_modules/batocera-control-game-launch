@@ -98,6 +98,21 @@ def apply_env(env: dict[str, str]) -> None:
         os.environ[key] = value
 
 
+def apply_perf(settings: dict) -> None:
+    """Optional nice + CPU affinity before exec (fail-open)."""
+    modules = pathlib.Path("/userdata/system/homebrew/plugins/armada-control/py_modules")
+    if not modules.is_dir():
+        return
+    if str(modules) not in sys.path:
+        sys.path.insert(0, str(modules))
+    from armada_control.perf import apply_to_self, sanitize_perf
+
+    clean = sanitize_perf(settings)
+    if not clean:
+        return
+    apply_to_self(nice=clean.get("nice"), cores=clean.get("cores"))
+
+
 def base_fex_config() -> dict:
     for path in BASE_FEX_CONFIGS:
         try:
@@ -172,6 +187,7 @@ def main() -> int:
         settings = merged_settings(tweaks, game_id)
         apply_fex(settings, game_id, contract["profiles"])
         apply_env(merged_env(tweaks, game_id))
+        apply_perf(settings)
     except Exception as exc:
         # Settings must never become a reason a game stops launching.
         print(f"batocera-control-game-launch: settings skipped: {exc}", file=sys.stderr)

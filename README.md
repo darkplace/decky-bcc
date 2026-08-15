@@ -97,10 +97,16 @@ temperature curve. Manual holds the selected percentage until a named curve or
 Off is chosen again, or until reboot. Unsupported or read-only fan
 implementations are not offered as writable controls.
 
-The editable eco/balanced/performance power-profile block needs the optional
-`odin-power` userdata helper. Without it, the Power tab still shows Adaptive
-CPU (`batocera-cpu-limit`) and fan controls; paddle "Cycle power" falls back to
-cycling CPU governors (`powersave` / `ondemand` / `schedutil` / `performance`).
+The editable eco/balanced/performance power-profile block uses `odin-power`
+when that maintainer helper is present. On stock Qualcomm images it uses a
+bundled factory config and applies **CPU governor + qcom-fan** only (no GPU
+underclocks). Without either backend, Adaptive CPU and fan controls remain.
+Paddle "Cycle power" walks stock profiles when available, otherwise CPU
+governors.
+
+Compatibility can set per-game or default **nice** and **CPU affinity**, applied
+by the launch helper on the next start, with an optional live Re-apply.
+Sleep Mode chosen in Settings is restored at boot by `batocera_control_boot`.
 
 Rear-paddle shortcuts call stock Batocera binaries where possible
 (`mangohudctl`, `qcom-fan`, `batocera-brightness`, uinput). Maintainer-only
@@ -109,8 +115,7 @@ userdata scripts are never required for those actions.
 Compatibility lists regular Steam apps and Non-Steam `shortcuts.vdf` titles,
 and can edit environment variables that the launch helper injects on the next
 game start. Settings exposes Sleep Mode when the kernel advertises more than
-one `/sys/power/mem_sleep` option. The Power tab offers a stock CPU governor
-control when Armada-style `odin-power` profiles are not installed.
+one `/sys/power/mem_sleep` option.
 
 ### OLED care and screensaver
 

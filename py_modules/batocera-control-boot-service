@@ -1,0 +1,67 @@
+#!/bin/sh
+# One-shot boot hooks for Batocera Control: restore sleep mode and power profile.
+# Installed under /userdata/system/services/ and enabled via batocera-services.
+
+NAME="batocera_control_boot"
+MODULES="/userdata/system/homebrew/plugins/armada-control/py_modules"
+SLEEP_PREF="/userdata/system/configs/batocera-control/sleep-mode.conf"
+MEM_SLEEP="/sys/power/mem_sleep"
+LOGFILE="/userdata/system/logs/batocera-control-boot.log"
+
+apply_sleep() {
+    if [ ! -f "${SLEEP_PREF}" ] || [ ! -w "${MEM_SLEEP}" ]; then
+        return 0
+    fi
+    mode="$(tr -d '[:space:]' < "${SLEEP_PREF}" 2>/dev/null || true)"
+    case "${mode}" in
+        s2idle|deep)
+            printf '%s\n' "${mode}" > "${MEM_SLEEP}" 2>/dev/null || true
+            ;;
+    esac
+}
+
+apply_power() {
+    if [ ! -f "${MODULES}/armada_control/power.py" ]; then
+        return 0
+    fi
+    export PYTHONPATH="${MODULES}${PYTHONPATH:+:${PYTHONPATH}}"
+    /usr/bin/python3 -c 'from armada_control.power import apply_boot_defaults; apply_boot_defaults()' \
+        >>"${LOGFILE}" 2>&1 || true
+}
+
+start() {
+    mkdir -p "$(dirname "${LOGFILE}")"
+    {
+        echo "=== ${NAME} start $(date -Iseconds 2>/dev/null || date) ==="
+        apply_sleep
+        apply_power
+    } >>"${LOGFILE}" 2>&1 || true
+}
+
+stop() {
+    :
+}
+
+status() {
+    echo "${NAME}: oneshot (no daemon)"
+    return 0
+}
+
+case "${1:-}" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart|reload)
+        start
+        ;;
+    status)
+        status
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|status}" >&2
+        exit 2
+        ;;
+esac

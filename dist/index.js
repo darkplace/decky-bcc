@@ -45,6 +45,7 @@ const saveCompatApplied = (appids) => {
 const setSshEnabled = (enabled) => call("set_ssh_enabled", enabled);
 const setSleepMode = (value) => call("set_sleep_mode", value);
 const setCpuGovernor = (value) => call("set_cpu_governor", value);
+const reapplyPerf = (appid) => call("reapply_perf", appid);
 const setControllerType = (value) => call("set_controller_type", value);
 const getControllerState = () => call("get_controller_state");
 const saveCalibration = (capture) => call("save_calibration", capture);
@@ -943,6 +944,11 @@ const thunkModules = [
     { module: "drm", label: "Host DRM" },
     { module: "WaylandClient", label: "Host Wayland" },
 ];
+const corePresetOptions = [
+    { data: "", label: "System default" },
+    { data: "all", label: "All CPUs" },
+    { data: "custom", label: "Custom cpulist" },
+];
 function ConfirmResetAllModal({ closeModal, onConfirm }) {
     const confirm = () => {
         closeModal?.();
@@ -976,6 +982,9 @@ function Compatibility({ config, setConfig }) {
     const [customSelected, setCustomSelected] = SP_REACT.useState(false);
     const [showThunks, setShowThunks] = SP_REACT.useState(false);
     const [showEnv, setShowEnv] = SP_REACT.useState(false);
+    const [showPerf, setShowPerf] = SP_REACT.useState(false);
+    const [reapplying, setReapplying] = SP_REACT.useState(false);
+    const [customCores, setCustomCores] = SP_REACT.useState("");
     const [compatTools, setCompatTools] = SP_REACT.useState([]);
     const [perGameTools, setPerGameTools] = SP_REACT.useState([]);
     const [currentTool, setCurrentTool] = SP_REACT.useState("");
@@ -1299,6 +1308,60 @@ function Compatibility({ config, setConfig }) {
                     else
                         next[key] = null;
                 }) }, key))), inheritedEnvEntries.length ? SP_JSX.jsx("div", { className: "armada-subheader", children: "Per-Game Variables" }) : null, ownEnvEntries.map(([key, value]) => (SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: () => openEnvVar(key), children: SP_JSX.jsx("div", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "left" }, children: value ? `${key}=${value}` : key }) }, key))), SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: () => openEnvVar(null), children: "+ Add Variable" }), SP_JSX.jsx(DFL.Field, { label: "Applies on next launch", description: "Variables are injected by batocera-control-game-launch before the game starts." })] }));
+    const niceEnabled = typeof values.nice === "number";
+    const niceValue = niceEnabled ? Number(values.nice) : 0;
+    const storedCores = values.cores;
+    const coresPreset = storedCores === undefined || storedCores === null || storedCores === ""
+        ? ""
+        : storedCores === "all"
+            ? "all"
+            : "custom";
+    SP_REACT.useEffect(() => {
+        if (coresPreset === "custom" && typeof storedCores === "string" && storedCores !== "all") {
+            setCustomCores(storedCores);
+        }
+        else if (coresPreset !== "custom") {
+            setCustomCores("");
+        }
+    }, [game?.appid, coresPreset, typeof storedCores === "string" ? storedCores : ""]);
+    const setNiceEnabled = (on) => {
+        if (on)
+            patchSettings({ nice: 0 });
+        else
+            patchSettings({ nice: undefined });
+    };
+    const setCoresPreset = (choice) => {
+        const next = String(choice);
+        if (next === "")
+            patchSettings({ cores: undefined });
+        else if (next === "all")
+            patchSettings({ cores: "all" });
+        else
+            patchSettings({ cores: customCores || "0" });
+    };
+    const onReapply = async () => {
+        if (reapplying)
+            return;
+        setReapplying(true);
+        try {
+            const result = await reapplyPerf(game?.appid || null);
+            toaster.toast({
+                title: "Performance re-applied",
+                body: `Touched ${result.pids} thread(s) on pid ${result.pid}`,
+            });
+        }
+        catch (error) {
+            toaster.toast({ title: "Could not re-apply", body: String(error) });
+        }
+        finally {
+            setReapplying(false);
+        }
+    };
+    const perfControls = (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.ToggleField, { label: "Override nice", checked: niceEnabled, onChange: setNiceEnabled }), niceEnabled ? (SP_JSX.jsx(SliderEdit, { label: "Nice", value: niceValue, min: -20, max: 19, step: 1, format: (value) => String(Math.round(value)), onChange: (value) => patchSettings({ nice: Math.round(value) }) })) : null, SP_JSX.jsx(SelectEdit, { label: "CPU affinity", value: coresPreset, options: corePresetOptions, onChange: setCoresPreset }), coresPreset === "custom" ? (SP_JSX.jsx(DFL.TextField, { label: "cpulist", value: customCores, onChange: (event) => {
+                    const next = event.target.value;
+                    setCustomCores(next);
+                    patchSettings({ cores: next.trim() || undefined });
+                } })) : null, SP_JSX.jsx(DFL.Field, { label: "Applies on next launch", description: "batocera-control-game-launch sets nice/affinity fail-open before exec. Re-apply can update a live SteamLaunch tree." }), SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: reapplying, onClick: () => { void onReapply(); }, children: reapplying ? "Re-applying..." : "Re-apply to running game" })] }));
     return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsxs(DFL.PanelSection, { title: "EDIT GAME PROFILE", children: [SP_JSX.jsx(SelectEdit, { value: game?.appid || "", options: gameOptions, onChange: setSelectedGame }), SP_JSX.jsx("div", { className: "armada-compat-note", children: "Compatibility changes apply on next launch" })] }), SP_JSX.jsxs(DFL.PanelSection, { title: "PROFILE SETTINGS", children: [editingDefault ? (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(SelectEdit, { labelBelow: true, label: "Default Proton", value: globalTool, options: toolOptions, onChange: onSelectGlobalDefault }), SP_JSX.jsx(DFL.ToggleField, { label: "Apply to New Games", checked: tweaks.global.autoApplyCompat !== false, onChange: (enabled) => {
                                     setAutoApplyCompat(enabled);
                                     patchSettings({ autoApplyCompat: enabled });
@@ -1306,7 +1369,7 @@ function Compatibility({ config, setConfig }) {
                         ? fexKnobs.map((knob) => (SP_JSX.jsx(DFL.ToggleField, { label: knob.label, checked: fexConfig[knob.key] === "1", onChange: (value) => setKnob(knob.key, value) }, knob.key)))
                         : null] }), SP_JSX.jsxs(DFL.PanelSection, { title: "ADVANCED", children: [config.fexRuntimeSupported ? (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: () => setShowThunks((value) => !value), children: showThunks ? "Hide Host Thunks" : "Host Thunks" }), showThunks
                                 ? thunkModules.map((thunk) => (SP_JSX.jsx(DFL.ToggleField, { label: thunk.label, checked: thunks[thunk.module] !== false, onChange: (value) => setThunk(thunk.module, value) }, thunk.module)))
-                                : null] })) : null, SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: () => setShowEnv((value) => !value), children: showEnv ? "Hide Environment" : "Environment" }), showEnv ? SP_JSX.jsx("div", { className: "armada-advanced-group", children: envControls }) : null] }), !editingDefault ? (SP_JSX.jsx(DFL.PanelSection, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: resetGame, children: "Reset to Default" }) })) : (SP_JSX.jsx(DFL.PanelSection, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: resettingAll, onClick: confirmResetAllGames, children: resettingAll ? "Resetting..." : "Reset All Games" }) }))] }));
+                                : null] })) : null, SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: () => setShowEnv((value) => !value), children: showEnv ? "Hide Environment" : "Environment" }), showEnv ? SP_JSX.jsx("div", { className: "armada-advanced-group", children: envControls }) : null, SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: () => setShowPerf((value) => !value), children: showPerf ? "Hide Performance" : "Performance" }), showPerf ? SP_JSX.jsx("div", { className: "armada-advanced-group", children: perfControls }) : null] }), !editingDefault ? (SP_JSX.jsx(DFL.PanelSection, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: resetGame, children: "Reset to Default" }) })) : (SP_JSX.jsx(DFL.PanelSection, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: resettingAll, onClick: confirmResetAllGames, children: resettingAll ? "Resetting..." : "Reset All Games" }) }))] }));
 }
 
 const DEFAULT_BRIGHTNESS = 70;
@@ -1750,16 +1813,22 @@ const underclocks = [
 function Power({ config, setConfig }) {
     const [profile, setProfile] = SP_REACT.useState(config.power.general.default_profile || "balanced");
     const profilesSupported = config.powerSupported && !!Object.keys(config.power.profiles || {}).length;
+    const stockBackend = config.powerBackend === "stock";
     const p = config.power.profiles[profile] || {};
-    const profiles = Object.entries(config.power.profiles || {}).map(([name, profile]) => ({
+    const profiles = Object.entries(config.power.profiles || {}).map(([name, entry]) => ({
         data: name,
-        label: profile.label || titleCase(name),
+        label: entry.label || titleCase(name),
     }));
     const fanCurves = Object.entries(config.power.fan_curves || {}).map(([name, curve]) => ({
         data: name,
         label: curve.label || titleCase(name),
     }));
     const governorOptions = (config.cpuGovernors || []).map((name) => ({ data: name, label: titleCase(name) }));
+    const selectProfile = (name) => {
+        const next = String(name);
+        setProfile(next);
+        setConfig((current) => (current ? update(current, ["power", "general", "default_profile"], next) : current));
+    };
     const setProfileValue = (name, value) => {
         setConfig((current) => (current ? update(current, ["power", "profiles", profile, name], value) : current));
     };
@@ -1799,8 +1868,8 @@ function Power({ config, setConfig }) {
     };
     const underclockLevel = p.cpu_underclock || "";
     const supportsUnderclockPresets = !!config.power.underclocks?.[config.cpuDeviceClass];
-    return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [profilesSupported ? (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.PanelSection, { title: "EDIT POWER PROFILE", children: SP_JSX.jsx(SelectEdit, { value: profile, options: profiles, onChange: setProfile }) }), SP_JSX.jsxs(DFL.PanelSection, { title: "PROFILE SETTINGS", children: [SP_JSX.jsx(SelectEdit, { label: "Fan Curve", value: p.fan_curve, options: fanCurves, onChange: (v) => setProfileValue("fan_curve", v) }), governorOptions.length ? (SP_JSX.jsx(SelectEdit, { label: "CPU Governor", value: p.cpu_governor || config.cpuGovernor || governorOptions[0].data, options: governorOptions, onChange: (v) => setProfileValue("cpu_governor", v) })) : null, supportsUnderclockPresets ? (SP_JSX.jsx(SelectEdit, { label: "CPU Underclock", value: underclockLevel, options: underclocks, onChange: (v) => setProfileValue("cpu_underclock", v) })) : (SP_JSX.jsx(SliderEdit, { label: "CPU Max (%)", value: Math.round(Number(p.cpu_max || 0) * 100), min: 35, max: 100, step: 1, onChange: (v) => setProfileValue("cpu_max", (v / 100).toFixed(2)) })), SP_JSX.jsx(SliderEdit, { label: "GPU Min (%)", value: Math.round(Number(p.gpu_min || 0) * 100), min: 0, max: 100, step: 1, onChange: (v) => setGpuValue("gpu_min", (v / 100).toFixed(2)) }), SP_JSX.jsx(SliderEdit, { label: "GPU Max (%)", value: Math.round(Number(p.gpu_max || 0) * 100), min: 35, max: 100, step: 1, onChange: (v) => setGpuValue("gpu_max", (v / 100).toFixed(2)) }), SP_JSX.jsx("div", { className: "armada-reset-row", children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: resetProfile, children: "Reset to Default" }) })] })] })) : (SP_JSX.jsx(DFL.PanelSection, { title: "Power profiles", children: SP_JSX.jsx(DFL.Field, { label: "Unavailable on this image", description: config.powerReason
-                        || "Per-profile CPU/GPU/fan-curve editing needs odin-power. Adaptive CPU and Fan controls below remain available." }) })), !profilesSupported && governorOptions.length ? (SP_JSX.jsxs(DFL.PanelSection, { title: "CPU governor", children: [SP_JSX.jsx(SelectEdit, { label: "Scaling governor", value: config.cpuGovernor || governorOptions[0].data, options: governorOptions, onChange: setCpuGovernor$1 }), SP_JSX.jsx(DFL.Field, { label: "Note", description: "Applies immediately via sysfs. Rear-paddle Cycle power walks the same governors." })] })) : null, SP_JSX.jsx(AdaptiveCpu, { config: config, setConfig: setConfig }), SP_JSX.jsx(FanControl, { config: config, setConfig: setConfig })] }));
+    return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [profilesSupported ? (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsxs(DFL.PanelSection, { title: "EDIT POWER PROFILE", children: [SP_JSX.jsx(SelectEdit, { value: profile, options: profiles, onChange: selectProfile }), stockBackend ? (SP_JSX.jsx(DFL.Field, { label: "Stock backend", description: "Applies CPU governor + qcom-fan for the selected profile. CPU%/GPU% limits are kept for odin-power images and are not written to hardware here." })) : null] }), SP_JSX.jsxs(DFL.PanelSection, { title: "PROFILE SETTINGS", children: [SP_JSX.jsx(SelectEdit, { label: "Fan Curve", value: p.fan_curve, options: fanCurves, onChange: (v) => setProfileValue("fan_curve", v) }), governorOptions.length ? (SP_JSX.jsx(SelectEdit, { label: "CPU Governor", value: p.cpu_governor || config.cpuGovernor || governorOptions[0].data, options: governorOptions, onChange: (v) => setProfileValue("cpu_governor", v) })) : null, !stockBackend && supportsUnderclockPresets ? (SP_JSX.jsx(SelectEdit, { label: "CPU Underclock", value: underclockLevel, options: underclocks, onChange: (v) => setProfileValue("cpu_underclock", v) })) : null, !stockBackend && !supportsUnderclockPresets ? (SP_JSX.jsx(SliderEdit, { label: "CPU Max (%)", value: Math.round(Number(p.cpu_max || 0) * 100), min: 35, max: 100, step: 1, onChange: (v) => setProfileValue("cpu_max", (v / 100).toFixed(2)) })) : null, !stockBackend ? (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(SliderEdit, { label: "GPU Min (%)", value: Math.round(Number(p.gpu_min || 0) * 100), min: 0, max: 100, step: 1, onChange: (v) => setGpuValue("gpu_min", (v / 100).toFixed(2)) }), SP_JSX.jsx(SliderEdit, { label: "GPU Max (%)", value: Math.round(Number(p.gpu_max || 0) * 100), min: 35, max: 100, step: 1, onChange: (v) => setGpuValue("gpu_max", (v / 100).toFixed(2)) })] })) : null, SP_JSX.jsx("div", { className: "armada-reset-row", children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: resetProfile, children: "Reset to Default" }) })] })] })) : (SP_JSX.jsx(DFL.PanelSection, { title: "Power profiles", children: SP_JSX.jsx(DFL.Field, { label: "Unavailable on this image", description: config.powerReason
+                        || "Per-profile CPU/GPU/fan-curve editing needs odin-power or stock qcom-fan. Adaptive CPU and Fan controls below remain available." }) })), !profilesSupported && governorOptions.length ? (SP_JSX.jsxs(DFL.PanelSection, { title: "CPU governor", children: [SP_JSX.jsx(SelectEdit, { label: "Scaling governor", value: config.cpuGovernor || governorOptions[0].data, options: governorOptions, onChange: setCpuGovernor$1 }), SP_JSX.jsx(DFL.Field, { label: "Note", description: "Applies immediately via sysfs. Rear-paddle Cycle power walks the same governors." })] })) : null, SP_JSX.jsx(AdaptiveCpu, { config: config, setConfig: setConfig }), SP_JSX.jsx(FanControl, { config: config, setConfig: setConfig })] }));
 }
 
 const CAPTURE_CONTROLS = ["left_x", "left_y", "right_x", "right_y", "left_trigger", "right_trigger"];

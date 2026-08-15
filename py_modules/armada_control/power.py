@@ -5,46 +5,99 @@ import tempfile
 import time
 from pathlib import Path
 
-from .system import atomically_write, run_cmd
+from .system import atomically_write, cpu_governors, run_cmd, set_cpu_governor
 
 POWER_CONFIG = Path("/userdata/system/configs/batocera-control/power-profiles.conf")
 FACTORY_POWER_CONFIG = Path("/usr/share/batocera-control/power-profiles.conf")
 BUNDLED_POWER_CONFIG = Path("/userdata/system/configs/batocera-control/power-profiles.factory.conf")
+PLUGIN_FACTORY = Path(__file__).resolve().parent.parent / "power-profiles.factory.conf"
 PROFILES = ("eco", "balanced", "performance")
 POWER_SCRIPT = Path("/userdata/system/scripts/odin-power")
+QCOM_FAN = Path("/usr/bin/qcom-fan")
 AMD_TDP = Path("/usr/bin/batocera-amd-tdp")
 SIMPLE_DECKY_TDP = Path("/userdata/system/homebrew/plugins/SimpleDeckyTDP/plugin.json")
 DEVICE_TREE_COMPAT = Path("/proc/device-tree/compatible")
 
+# Named fan curves → stock qcom-fan modes (safe subset; no PWM underclocks).
+FAN_CURVE_TO_QCOM = {
+    "relaxed": "silent",
+    "moderate": "auto",
+    "aggressive": "aggressive",
+}
 
-def supported():
-    return POWER_SCRIPT.is_file() and any(path.exists() for path in (FACTORY_POWER_CONFIG, BUNDLED_POWER_CONFIG))
+
+def ensure_bundled_factory() -> None:
+    """Seed userdata factory copy from image or plugin payload."""
+    if BUNDLED_POWER_CONFIG.exists():
+        return
+    source = FACTORY_POWER_CONFIG if FACTORY_POWER_CONFIG.exists() else PLUGIN_FACTORY
+    if not source.exists():
+        return
+    try:
+        BUNDLED_POWER_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, BUNDLED_POWER_CONFIG)
+    except OSError:
+        pass
 
 
-def unsupported_reason():
-    if not POWER_SCRIPT.is_file():
-        x86_amd = AMD_TDP.is_file() and not DEVICE_TREE_COMPAT.exists()
-        if x86_amd and SIMPLE_DECKY_TDP.is_file():
-            return "AMD TDP is managed by SimpleDeckyTDP on this x86 handheld"
-        if x86_amd:
-            return "Use Batocera's native AMD TDP controls on this x86 handheld"
-        return (
-            "Odin power profiles need /userdata/system/scripts/odin-power. "
-            "Adaptive CPU and qcom-fan controls below still work on stock images"
-        )
-    if not any(path.exists() for path in (FACTORY_POWER_CONFIG, BUNDLED_POWER_CONFIG)):
+def _x86_amd_handheld() -> bool:
+    return AMD_TDP.is_file() and not DEVICE_TREE_COMPAT.exists()
+
+
+def odin_backend() -> bool:
+    return POWER_SCRIPT.is_file()
+
+
+def stock_backend() -> bool:
+    """Governor + qcom-fan profiles without maintainer odin-power."""
+    if _x86_amd_handheld():
+        return False
+    return QCOM_FAN.is_file() or bool(cpu_governors())
+
+
+def has_power_definitions() -> bool:
+    ensure_bundled_factory()
+    return any(path.exists() for path in (FACTORY_POWER_CONFIG, BUNDLED_POWER_CONFIG, PLUGIN_FACTORY))
+
+
+def backend() -> str:
+    if not has_power_definitions():
+        return "none"
+    if odin_backend():
+        return "odin-power"
+    if stock_backend():
+        return "stock"
+    return "none"
+
+
+def supported() -> bool:
+    return backend() != "none"
+
+
+def unsupported_reason() -> str:
+    if supported():
+        return ""
+    if _x86_amd_handheld() and SIMPLE_DECKY_TDP.is_file():
+        return "AMD TDP is managed by SimpleDeckyTDP on this x86 handheld"
+    if _x86_amd_handheld():
+        return "Use Batocera's native AMD TDP controls on this x86 handheld"
+    if not has_power_definitions():
         return "Power profile definitions are not installed"
-    return ""
+    return (
+        "Power profiles need qcom-fan / CPU governors (stock) or "
+        "/userdata/system/scripts/odin-power. Adaptive CPU and Fan controls below still work"
+    )
 
 
 def _config_paths(path=None):
     if path is not None:
         return [path]
+    ensure_bundled_factory()
     paths: list[Path] = []
-    for candidate in (FACTORY_POWER_CONFIG, BUNDLED_POWER_CONFIG, POWER_CONFIG):
+    for candidate in (FACTORY_POWER_CONFIG, BUNDLED_POWER_CONFIG, PLUGIN_FACTORY, POWER_CONFIG):
         if candidate.exists() and candidate not in paths:
             paths.append(candidate)
-    return paths or [FACTORY_POWER_CONFIG]
+    return paths or [PLUGIN_FACTORY if PLUGIN_FACTORY.exists() else FACTORY_POWER_CONFIG]
 
 
 def default_label(name):
@@ -72,9 +125,13 @@ def parse_power(path=None, repair=True):
         return parsed_power(parser)
     except (configparser.Error, FileNotFoundError, ValueError) as exc:
         # Avoid factory-restore on IO errors or code bugs in the read path.
-        if path is None and repair:
+        if path is None and repair and POWER_CONFIG.exists():
             restore_factory_power_config(exc)
-            return parse_power(FACTORY_POWER_CONFIG, repair=False)
+            ensure_bundled_factory()
+            fallback = FACTORY_POWER_CONFIG if FACTORY_POWER_CONFIG.exists() else BUNDLED_POWER_CONFIG
+            if not fallback.exists():
+                fallback = PLUGIN_FACTORY
+            return parse_power(fallback, repair=False)
         raise
 
 
@@ -167,10 +224,81 @@ def render_power(data, factory):
 
 
 def factory_power_defaults():
+    ensure_bundled_factory()
+    for path in (FACTORY_POWER_CONFIG, BUNDLED_POWER_CONFIG, PLUGIN_FACTORY):
+        if path.exists():
+            try:
+                return parse_power(path, repair=False)
+            except (OSError, configparser.Error, ValueError, FileNotFoundError):
+                continue
+    return parse_power()
+
+
+def resolve_qcom_mode(data: dict, curve_name: str) -> str | None:
+    entry = (data.get("fan_curves") or {}).get(curve_name) or {}
+    curve_spec = str(entry.get("curve") or "")
+    if curve_spec.startswith("stock:"):
+        return curve_spec.split(":", 1)[1].strip() or None
+    return FAN_CURVE_TO_QCOM.get(curve_name)
+
+
+def apply_active_profile(data=None) -> dict:
+    """Apply default profile using odin-power reload or stock governor+fan."""
+    payload = data if data is not None else parse_power()
+    name = payload["general"]["default_profile"]
+    if name not in PROFILES:
+        raise ValueError(f"invalid profile: {name}")
+    profile = payload["profiles"][name]
+    applied = {"profile": name, "backend": backend(), "governor": None, "fan": None}
+
+    if odin_backend():
+        result = run_cmd([str(POWER_SCRIPT), "reload"], timeout=15)
+        if not result or result.returncode != 0:
+            raise RuntimeError("power profile was saved but the power service reload failed")
+        applied["backend"] = "odin-power"
+        return applied
+
+    gov = str(profile.get("cpu_governor") or "").strip()
+    available = set(cpu_governors())
+    if gov and gov in available:
+        set_cpu_governor(gov)
+        applied["governor"] = gov
+
+    mode = resolve_qcom_mode(payload, str(profile.get("fan_curve") or ""))
+    if mode and QCOM_FAN.is_file():
+        if mode in ("off", "stop"):
+            run_cmd([str(QCOM_FAN), "stop"], timeout=10)
+        else:
+            run_cmd([str(QCOM_FAN), mode], timeout=10)
+        applied["fan"] = mode
+    return applied
+
+
+def apply_boot_defaults() -> None:
+    """Best-effort boot apply for stock/odin power (never raises)."""
     try:
-        return parse_power(FACTORY_POWER_CONFIG)
-    except OSError:
-        return parse_power()
+        if supported():
+            apply_active_profile()
+    except Exception:
+        pass
+
+
+def cycle_profile() -> str:
+    """Advance eco→balanced→performance, persist default, apply. Returns new name."""
+    data = parse_power()
+    current = data["general"]["default_profile"]
+    try:
+        idx = PROFILES.index(current)
+    except ValueError:
+        idx = -1
+    nxt = PROFILES[(idx + 1) % len(PROFILES)]
+    data["general"]["default_profile"] = nxt
+    # Persist only the default_profile override without full UI validation path.
+    factory = factory_power_defaults()
+    rendered = render_power(data, factory)
+    atomically_write(POWER_CONFIG, rendered)
+    apply_active_profile(data)
+    return nxt
 
 
 def save_power_config(data):
@@ -200,6 +328,4 @@ def save_power_config(data):
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"malformed power config: {exc}")
     atomically_write(POWER_CONFIG, rendered)
-    result = run_cmd([str(POWER_SCRIPT), "reload"], timeout=15)
-    if not result or result.returncode != 0:
-        raise RuntimeError("power profile was saved but the power service reload failed")
+    apply_active_profile(data)

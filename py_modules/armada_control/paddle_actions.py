@@ -44,7 +44,7 @@ ACTIONS = [
     ("wifi_toggle", "Toggle Wi-Fi"),
     ("bluetooth_toggle", "Toggle Bluetooth"),
     ("fan_mode_cycle", "Cycle fan (silent/auto/aggressive/manual 50%/off)"),
-    ("power_profile_cycle", "Cycle power (odin-power or CPU governor)"),
+    ("power_profile_cycle", "Cycle power (profiles or CPU governor)"),
     ("screenshot", "Screenshot"),
     ("volume_up", "Volume up"),
     ("volume_down", "Volume down"),
@@ -387,6 +387,20 @@ def resolve_action(action: str) -> dict:
                 "command": [str(ODIN_POWER), "profile", "cycle"],
                 "reason": "",
             }
+        # Stock eco/balanced/performance via plugin power backend.
+        try:
+            from . import power as power_mod
+
+            if power_mod.stock_backend() and power_mod.has_power_definitions():
+                return {
+                    "action": action,
+                    "available": True,
+                    "backend": "stock-power",
+                    "command": ["batocera-control", "power", "cycle"],
+                    "reason": "",
+                }
+        except Exception:
+            pass
         governors = _available_governors()
         if governors:
             return {
@@ -401,7 +415,7 @@ def resolve_action(action: str) -> dict:
             "available": False,
             "backend": "none",
             "command": [],
-            "reason": "odin-power missing and no CPU governors exposed",
+            "reason": "no power profiles or CPU governors available",
         }
     if action == "screenshot":
         if SCREENSHOT.is_file():
@@ -603,6 +617,14 @@ def run_action(action: str) -> None:
         if ODIN_POWER.is_file():
             _run([str(ODIN_POWER), "profile", "cycle"])
             return
+        try:
+            from . import power as power_mod
+
+            if power_mod.stock_backend() and power_mod.has_power_definitions():
+                power_mod.cycle_profile()
+                return
+        except Exception:
+            pass
         _cycle_stock_governor()
         return
 

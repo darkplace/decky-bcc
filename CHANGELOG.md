@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.16 - 2026-08-15
+
+- Compatibility Performance: optional nice + CPU affinity (cpulist), applied
+  fail-open by `batocera-control-game-launch`, plus Re-apply to a live
+  SteamLaunch process tree.
+- Stock power profiles without `odin-power`: eco/balanced/performance map to
+  CPU governor + `qcom-fan` (bundled factory conf). Selecting a profile sets it
+  active; paddle Cycle power walks the same profiles when stock backend is live.
+- Persist Sleep Mode (and re-apply the default power profile) at boot via
+  `batocera_control_boot` userdata service.
+
 ## 0.2.15 - 2026-08-15
 
 - List Non-Steam / `shortcuts.vdf` titles in Compatibility (binary VDF parser).

@@ -8,6 +8,7 @@ from .joystick_led import COLOR_PRESETS, get_state as joystick_led_state
 from .lsfg import get_state as lsfg_state
 from .oled_care import get_state as oled_care_state
 from .power import (
+    backend as power_backend,
     factory_power_defaults,
     parse_power,
     supported as power_supported,
@@ -75,6 +76,7 @@ def build_config(include_games=True):
         "powerDefaults": power_defaults,
         "powerSupported": power_supported(),
         "powerReason": power_unsupported_reason(),
+        "powerBackend": power_backend(),
         "cpuLimit": _safe(
             "Adaptive power",
             cpu_limit_state,

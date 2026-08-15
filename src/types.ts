@@ -268,6 +268,7 @@ export interface Config {
   powerDefaults: PowerConfig;
   powerSupported: boolean;
   powerReason: string;
+  powerBackend?: "odin-power" | "stock" | "none" | string;
   cpuLimit?: CpuLimitState;
   fanControl?: FanControlState;
   tweaks: Tweaks;

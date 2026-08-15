@@ -25,7 +25,7 @@ from armada_control.oled_care import restart_service as restart_oled_care
 from armada_control.oled_care import save_state as save_oled_care
 from armada_control.power import save_power_config
 from armada_control.steam import installed_games
-from armada_control.tweaks import load_compat_applied, save_compat_applied, save_tweaks
+from armada_control.tweaks import load_compat_applied, load_tweaks, save_compat_applied, save_tweaks
 
 
 class Plugin:
@@ -38,6 +38,11 @@ class Plugin:
     async def save_power_config(self, data):
         await asyncio.to_thread(save_power_config, data)
         return await self.get_config()
+
+    async def reapply_perf(self, appid=None):
+        from armada_control.perf import reapply_from_tweaks
+
+        return await asyncio.to_thread(reapply_from_tweaks, load_tweaks(), appid)
 
     async def get_cpu_limit(self):
         return await asyncio.to_thread(cpu_limit_state)

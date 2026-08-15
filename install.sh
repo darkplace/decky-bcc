@@ -10,7 +10,7 @@ DISABLED_PARENT="${USERDATA}/system/homebrew/disabled-plugins"
 STAGE="${USERDATA}/system/homebrew/.armada-control.new.$$"
 BACKUP="${DISABLED_PARENT}/armada-control-previous"
 LEGACY_BACKUP="${TARGET_PARENT}/.armada-control.previous"
-LOCK="/var/lock/batocera-control-install.lock"
+LOCK="${USERDATA}/system/logs/batocera-control-install.lock"
 LOG="${USERDATA}/system/logs/batocera-control-install.log"
 PLUGIN_LOADER="${USERDATA}/system/homebrew/services/PluginLoader"
 NO_RESTART=0
@@ -24,7 +24,8 @@ fi
 
 for required in plugin.json main.py dist/index.js py_modules/armada_control/config.py \
     py_modules/batocera-control-game-launch py_modules/batocera-control-lsfg-launch \
-    py_modules/batocera-control-paddles-service py_modules/fex-profiles.json \
+    py_modules/batocera-control-paddles-service py_modules/batocera-control-boot-service \
+    py_modules/fex-profiles.json py_modules/power-profiles.factory.conf \
     PAYLOAD.sha256; do
     if [ ! -f "${ROOT}/${required}" ]; then
         echo "Batocera Control payload is incomplete: missing ${required}" >&2
@@ -69,7 +70,8 @@ find "$STAGE" -type d -exec chmod 0755 {} +
 find "$STAGE" -type f -exec chmod 0644 {} +
 chmod 0755 "$STAGE/py_modules/batocera-control-game-launch" \
     "$STAGE/py_modules/batocera-control-lsfg-launch" \
-    "$STAGE/py_modules/batocera-control-paddles-service"
+    "$STAGE/py_modules/batocera-control-paddles-service" \
+    "$STAGE/py_modules/batocera-control-boot-service"
 
 # Verify the exact staged tree, not only the source archive. A truncated Decky
 # frontend can leave GamepadUI unusable even though the Python backend starts.
@@ -87,6 +89,10 @@ install -D -m 0755 "${ROOT}/py_modules/batocera-control-lsfg-launch" \
     "${USERDATA}/system/bin/batocera-control-lsfg-launch"
 install -D -m 0644 "${ROOT}/py_modules/fex-profiles.json" \
     "${USERDATA}/system/configs/batocera-control/fex-profiles.json"
+if [ ! -f "${USERDATA}/system/configs/batocera-control/power-profiles.factory.conf" ]; then
+    install -D -m 0644 "${ROOT}/py_modules/power-profiles.factory.conf" \
+        "${USERDATA}/system/configs/batocera-control/power-profiles.factory.conf"
+fi
 
 rm -rf "$BACKUP" "$LEGACY_BACKUP"
 if [ -e "$TARGET" ]; then
@@ -103,6 +109,16 @@ fi
 sync
 
 echo "Installed Batocera Control $(cat "${TARGET}/VERSION")"
+
+BOOT_SERVICE_NAME="batocera_control_boot"
+BOOT_SERVICE="${USERDATA}/system/services/${BOOT_SERVICE_NAME}"
+install -D -m 0755 "${ROOT}/py_modules/batocera-control-boot-service" \
+    "${BOOT_SERVICE}"
+if command -v batocera-services >/dev/null 2>&1; then
+    batocera-services enable "${BOOT_SERVICE_NAME}" >/dev/null 2>&1 || true
+fi
+# Apply sleep + power once at install time as well as on next boot.
+"${BOOT_SERVICE}" start >/dev/null 2>&1 || true
 
 PADDLE_SERVICE_NAME="batocera_control_paddles"
 PADDLE_SERVICE="${USERDATA}/system/services/${PADDLE_SERVICE_NAME}"

@@ -587,6 +587,8 @@ class PaddleActionTests(unittest.TestCase):
                 mock.patch.object(paddle_actions, "CPUFREQ_ROOT", root),
                 mock.patch.object(paddle_actions, "GOVERNOR_STATE", state),
                 mock.patch.object(paddle_actions, "_run", side_effect=lambda command: commands.append(command) or ""),
+                mock.patch("armada_control.power.stock_backend", return_value=False),
+                mock.patch("armada_control.power.has_power_definitions", return_value=False),
             ):
                 paddle_actions.run_action("power_profile_cycle")
                 info = paddle_actions.resolve_action("power_profile_cycle")
@@ -767,10 +769,14 @@ class PowerDetectionTests(unittest.TestCase):
             device_tree.touch()
             with (
                 mock.patch.object(power, "POWER_SCRIPT", root / "missing-odin-power"),
+                mock.patch.object(power, "QCOM_FAN", root / "missing-qcom-fan"),
                 mock.patch.object(power, "AMD_TDP", amd_tdp),
                 mock.patch.object(power, "DEVICE_TREE_COMPAT", device_tree),
                 mock.patch.object(power, "SIMPLE_DECKY_TDP", root / "missing-plugin"),
+                mock.patch.object(power, "cpu_governors", return_value=[]),
+                mock.patch.object(power, "has_power_definitions", return_value=True),
             ):
+                self.assertFalse(power.supported())
                 self.assertIn("odin-power", power.unsupported_reason())
                 self.assertIn("Adaptive CPU", power.unsupported_reason())
 
@@ -789,6 +795,40 @@ class PowerDetectionTests(unittest.TestCase):
                 mock.patch.object(power, "SIMPLE_DECKY_TDP", plugin),
             ):
                 self.assertIn("SimpleDeckyTDP", power.unsupported_reason())
+
+    def test_stock_backend_uses_qcom_fan_without_odin_power(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            qcom = root / "qcom-fan"
+            qcom.write_text("#!/bin/sh\n", encoding="utf-8")
+            qcom.chmod(0o755)
+            factory = PLUGIN_ROOT / "py_modules" / "power-profiles.factory.conf"
+            with (
+                mock.patch.object(power, "POWER_SCRIPT", root / "missing-odin-power"),
+                mock.patch.object(power, "QCOM_FAN", qcom),
+                mock.patch.object(power, "FACTORY_POWER_CONFIG", root / "missing-usr"),
+                mock.patch.object(power, "BUNDLED_POWER_CONFIG", root / "bundled.conf"),
+                mock.patch.object(power, "PLUGIN_FACTORY", factory),
+                mock.patch.object(power, "AMD_TDP", root / "missing-amd"),
+                mock.patch.object(power, "DEVICE_TREE_COMPAT", root / "compatible"),
+                mock.patch.object(power, "cpu_governors", return_value=["ondemand", "performance"]),
+            ):
+                (root / "compatible").touch()
+                self.assertEqual(power.backend(), "stock")
+                self.assertTrue(power.supported())
+                self.assertEqual(power.unsupported_reason(), "")
+
+
+class PerfHelperTests(unittest.TestCase):
+    def test_parse_cpulist_and_sanitize(self):
+        from armada_control import perf as perf_mod
+
+        self.assertEqual(perf_mod.parse_cpulist("0-2,4"), [0, 1, 2, 4])
+        with mock.patch.object(perf_mod, "online_cpus", return_value=[0, 1, 2, 3]):
+            clean = perf_mod.sanitize_perf({"nice": "5", "cores": "0-1"})
+            self.assertEqual(clean["nice"], 5)
+            self.assertEqual(clean["cores"], [0, 1])
+            self.assertEqual(perf_mod.sanitize_perf({"cores": "all"})["cores"], [0, 1, 2, 3])
 
 
 class CpuLimitTests(unittest.TestCase):

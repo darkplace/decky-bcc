@@ -23,7 +23,8 @@ find . -type f -name '*.pyc' -delete
 PAYLOAD_FILES=(
     VERSION SOURCE.json LICENSE.md THIRD_PARTY_NOTICES.md package.json plugin.json main.py
     dist/index.js py_modules/batocera-control-game-launch py_modules/batocera-control-lsfg-launch
-    py_modules/batocera-control-paddles-service py_modules/fex-profiles.json
+    py_modules/batocera-control-paddles-service py_modules/batocera-control-boot-service
+    py_modules/fex-profiles.json py_modules/power-profiles.factory.conf
 )
 while IFS= read -r file; do PAYLOAD_FILES+=("$file"); done < <(find py_modules/armada_control -type f | sort)
 sha256sum "${PAYLOAD_FILES[@]}" > PAYLOAD.sha256
