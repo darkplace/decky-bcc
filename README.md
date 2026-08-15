@@ -90,21 +90,32 @@ ownership of the normal TDP slider. Steam sessions read Gamescope statistics
 while ES-launched emulators use the system's hidden FPS sampler. That sampler
 is independent of Steam's visible MangoHud performance overlay.
 
-On supported Qualcomm handhelds, the same tab exposes `qcom-fan` Automatic and
-Manual modes used by Batocera Control Center. Automatic follows the system
-temperature curve. Manual holds the selected 20–100% setting until Automatic
-is selected again or the system restarts, and the UI warns that the curve is
-temporarily overridden. Unsupported or read-only fan implementations are not
-offered as writable controls.
+On supported Qualcomm handhelds, the same tab exposes `qcom-fan` modes used by
+Batocera Control Center: **Silent**, **Balanced (auto)**, **Aggressive**,
+**Manual** (20–100%), and **Off**. Automatic/balanced follows the system
+temperature curve. Manual holds the selected percentage until a named curve or
+Off is chosen again, or until reboot. Unsupported or read-only fan
+implementations are not offered as writable controls.
+
+The editable eco/balanced/performance power-profile block needs the optional
+`odin-power` userdata helper. Without it, the Power tab still shows Adaptive
+CPU (`batocera-cpu-limit`) and fan controls; paddle "Cycle power" falls back to
+cycling CPU governors (`powersave` / `ondemand` / `schedutil` / `performance`).
+
+Rear-paddle shortcuts call stock Batocera binaries where possible
+(`mangohudctl`, `qcom-fan`, `batocera-brightness`, uinput). Maintainer-only
+userdata scripts are never required for those actions.
 
 ### OLED care and screensaver
 
-Where the Odin OLED idle-dim service is present, the OLED tab configures its
-brightness cap and idle threshold. A detected Odin OLED panel also gets a
-manual mostly-black moving screensaver even when the older idle-dim service is
-not installed. It keeps Steam and downloads running, does not suspend or
-modify saved brightness, and exits on the first controller button, keyboard
-key, or touch input.
+Automatic idle-dim (legacy `odin-oled-care` userdata service) is **deferred**
+until a stock-native implementation exists; the plugin does not enable or
+configure that host service in current releases.
+
+A detected Odin OLED panel still gets a manual mostly-black moving screensaver
+in Decky. It keeps Steam and downloads running, does not suspend or modify
+saved brightness, and exits on the first controller button, keyboard key, or
+touch input.
 
 On x86 handhelds, the x64/Wine layer is sufficient. Compatibility-tool,
 resolution, LED, and LSFG controls remain available, while the ARM-only FEX

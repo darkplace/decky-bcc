@@ -19,9 +19,22 @@ export function BackPaddles({ config, setConfig }: {
   const bindings = bp.bindings;
   const slots = bp.slots || [];
   const actions = bp.actions || [];
+  const health = bp.bindingHealth || {};
   const mouseModeAssigned = Object.values(bindings).includes("mouse_toggle");
   const backend = bp.source === "rsinput" ? "RSInput events + combos" : "Legacy GPIO + combos";
   const device = [bp.device?.name, bp.device?.path].filter(Boolean).join(" — ");
+  const codeMap =
+    bp.device?.m1Code != null && bp.device?.m2Code != null
+      ? `M1 code ${bp.device.m1Code}, M2 code ${bp.device.m2Code}`
+      : "";
+  const activeHealth = Object.entries(bindings)
+    .filter(([, action]) => action && action !== "none")
+    .map(([slot, action]) => {
+      const info = health[slot];
+      if (!info) return `${slot}→${action}`;
+      if (!info.available) return `${slot}→${action} unavailable`;
+      return `${slot}→${info.backend}`;
+    });
 
   const apply = (next: BackPaddleBindings) => {
     const request = ++revision.current;
@@ -47,7 +60,7 @@ export function BackPaddles({ config, setConfig }: {
       <PanelSection title="Back paddles (M1 / M2)">
         <Field
           label={backend}
-          description={device || "AYN rear-paddle input"}
+          description={[device || "AYN rear-paddle input", codeMap].filter(Boolean).join(" · ")}
           children="Tap actions fire on release. Chords fire once while held. The listener observes without grabbing, so Steam, ES, and emulators still receive both paddles."
         />
         {bp.source === "rsinput" ? (
@@ -55,6 +68,9 @@ export function BackPaddles({ config, setConfig }: {
             label="Batocera hotkeys coexist"
             description="Home/Hotkey + paddle is left to Batocera and suppresses the paddle tap action, preventing both mappings from firing together."
           />
+        ) : null}
+        {activeHealth.length ? (
+          <Field label="Binding targets" description={activeHealth.join(" · ")} />
         ) : null}
       </PanelSection>
       <PanelSection title="Bindings">

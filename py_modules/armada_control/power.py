@@ -28,7 +28,10 @@ def unsupported_reason():
             return "AMD TDP is managed by SimpleDeckyTDP on this x86 handheld"
         if x86_amd:
             return "Use Batocera's native AMD TDP controls on this x86 handheld"
-        return "Odin power service is not installed"
+        return (
+            "Odin power profiles need /userdata/system/scripts/odin-power. "
+            "Adaptive CPU and qcom-fan controls below still work on stock images"
+        )
     if not any(path.exists() for path in (FACTORY_POWER_CONFIG, BUNDLED_POWER_CONFIG)):
         return "Power profile definitions are not installed"
     return ""

@@ -10,11 +10,26 @@ from .system import run_cmd
 
 HELPER = Path("/usr/bin/qcom-fan")
 MIN_MANUAL_PERCENT = 20
+# Keep in sync with qcom-fan AUTO_MODES + manual/off.
+AUTO_MODES = ("silent", "auto", "aggressive")
+SELECTABLE_MODES = (*AUTO_MODES, "manual", "off")
 _LOCK = threading.RLock()
 
 
 def _result(args: list[str], timeout: int = 10):
     return run_cmd([str(HELPER), *args], timeout=timeout)
+
+
+def _normalize_mode(raw: str) -> str:
+    mode = str(raw or "").strip().lower()
+    if mode in SELECTABLE_MODES:
+        return mode
+    # qcom-fan may report "driver auto" / "read only" when idle.
+    if "manual" in mode:
+        return "manual"
+    if mode in ("driver auto", "read only", ""):
+        return "auto"
+    return "auto"
 
 
 def _unavailable(reason: str) -> dict:
@@ -28,6 +43,13 @@ def _unavailable(reason: str) -> dict:
         "targetPercent": None,
         "rpm": None,
         "minimumManualPercent": MIN_MANUAL_PERCENT,
+        "modes": [{"data": key, "label": label} for key, label in (
+            ("silent", "Silent curve"),
+            ("auto", "Balanced curve"),
+            ("aggressive", "Aggressive curve"),
+            ("manual", "Manual override"),
+            ("off", "Off"),
+        )],
     }
 
 
@@ -46,11 +68,18 @@ def get_state() -> dict:
         "reason": "" if raw.get("control") else "Fan telemetry is read-only on this device",
         "controllable": bool(raw.get("control")),
         "name": str(raw.get("name") or "System fan"),
-        "mode": str(raw.get("mode") or ""),
+        "mode": _normalize_mode(str(raw.get("mode") or "")),
         "percent": raw.get("percent") if isinstance(raw.get("percent"), (int, float)) else None,
         "targetPercent": raw.get("target_percent") if isinstance(raw.get("target_percent"), (int, float)) else None,
         "rpm": raw.get("rpm") if isinstance(raw.get("rpm"), (int, float)) else None,
         "minimumManualPercent": MIN_MANUAL_PERCENT,
+        "modes": [
+            {"data": "silent", "label": "Silent curve"},
+            {"data": "auto", "label": "Balanced curve"},
+            {"data": "aggressive", "label": "Aggressive curve"},
+            {"data": "manual", "label": "Manual override"},
+            {"data": "off", "label": "Off"},
+        ],
     }
 
 
@@ -63,12 +92,14 @@ def save_state(data: dict) -> dict:
     if not isinstance(data, dict):
         raise ValueError("fan settings must be an object")
 
-    mode = str(data.get("mode") or "")
-    if mode not in ("auto", "manual"):
+    mode = _normalize_mode(str(data.get("mode") or ""))
+    if mode not in SELECTABLE_MODES:
         raise ValueError("invalid fan mode")
     with _LOCK:
-        if mode == "auto":
-            result = _result(["auto"], timeout=20)
+        if mode in AUTO_MODES:
+            result = _result([mode], timeout=20)
+        elif mode == "off":
+            result = _result(["stop"], timeout=20)
         else:
             value = data.get("targetPercent")
             if isinstance(value, bool):

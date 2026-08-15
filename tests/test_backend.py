@@ -547,6 +547,76 @@ class PaddleActionTests(unittest.TestCase):
             self.assertIn(["batocera-brightness", "70"], commands)
             self.assertFalse(saved.exists())
 
+    def test_mangohud_uses_stock_mangohudctl(self):
+        commands = []
+        with tempfile.TemporaryDirectory() as temp:
+            ctl = Path(temp) / "mangohudctl"
+            ctl.write_text("#!/bin/sh\n", encoding="utf-8")
+            with (
+                mock.patch.object(paddle_actions, "MANGOHUDCTL", ctl),
+                mock.patch.object(paddle_actions, "_run", side_effect=lambda command: commands.append(command) or ""),
+            ):
+                paddle_actions.run_action("mangohud_toggle")
+                info = paddle_actions.resolve_action("mangohud_toggle")
+        self.assertEqual(commands, [[str(ctl), "toggle", "no_display"]])
+        self.assertTrue(info["available"])
+        self.assertEqual(info["backend"], "mangohudctl")
+
+    def test_keys_do_not_call_userdata_odin_key_send(self):
+        commands = []
+        with (
+            mock.patch.object(paddle_actions, "_run", side_effect=lambda command: commands.append(command) or ""),
+            mock.patch.object(paddle_actions, "_uinput_ready", return_value=False),
+        ):
+            paddle_actions.run_action("key_f1")
+        self.assertEqual(commands, [])
+        self.assertTrue(all("/userdata/system/scripts" not in " ".join(cmd) for cmd in commands))
+
+    def test_power_profile_cycle_falls_back_to_cpu_governor(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cpu0 = root / "cpu0" / "cpufreq"
+            cpu0.mkdir(parents=True)
+            (cpu0 / "scaling_available_governors").write_text("ondemand powersave performance\n", encoding="utf-8")
+            (cpu0 / "scaling_governor").write_text("ondemand\n", encoding="utf-8")
+            state = root / "governor-state"
+            missing_odin = root / "missing-odin-power"
+            commands = []
+            with (
+                mock.patch.object(paddle_actions, "ODIN_POWER", missing_odin),
+                mock.patch.object(paddle_actions, "CPUFREQ_ROOT", root),
+                mock.patch.object(paddle_actions, "GOVERNOR_STATE", state),
+                mock.patch.object(paddle_actions, "_run", side_effect=lambda command: commands.append(command) or ""),
+            ):
+                paddle_actions.run_action("power_profile_cycle")
+                info = paddle_actions.resolve_action("power_profile_cycle")
+            self.assertEqual(commands, [])
+            self.assertEqual(state.read_text(encoding="utf-8"), "performance")
+            self.assertEqual((cpu0 / "scaling_governor").read_text(encoding="utf-8").strip(), "performance")
+            self.assertTrue(info["available"])
+            self.assertEqual(info["backend"], "cpufreq-governor")
+
+    def test_every_named_action_has_a_resolver(self):
+        for key, _label in paddle_actions.ACTIONS:
+            info = paddle_actions.resolve_action(key)
+            self.assertEqual(info["action"], key)
+            self.assertNotEqual(info["backend"], "unimplemented")
+
+    def test_fan_cycle_prefers_qcom_fan(self):
+        commands = []
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp) / "fan"
+            qcom = Path(temp) / "qcom-fan"
+            qcom.write_text("#!/bin/sh\n", encoding="utf-8")
+            with (
+                mock.patch.object(paddle_actions, "QCOM_FAN", qcom),
+                mock.patch.object(paddle_actions, "FAN_MODE_STATE", state),
+                mock.patch.object(paddle_actions, "_run", side_effect=lambda command: commands.append(command) or ""),
+            ):
+                paddle_actions.run_action("fan_mode_cycle")
+            self.assertEqual(commands[0][0], str(qcom))
+            self.assertIn(commands[0][1], {"silent", "auto", "aggressive", "set", "stop"})
+
 
 class PersistentRuntimeTests(unittest.TestCase):
     def test_arm_host_survives_fex_x86_personality(self):
@@ -619,7 +689,8 @@ class PowerDetectionTests(unittest.TestCase):
                 mock.patch.object(power, "DEVICE_TREE_COMPAT", device_tree),
                 mock.patch.object(power, "SIMPLE_DECKY_TDP", root / "missing-plugin"),
             ):
-                self.assertEqual(power.unsupported_reason(), "Odin power service is not installed")
+                self.assertIn("odin-power", power.unsupported_reason())
+                self.assertIn("Adaptive CPU", power.unsupported_reason())
 
     def test_x86_defers_to_simple_decky_tdp(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -872,6 +943,53 @@ class FanControlTests(unittest.TestCase):
                 fan_control.save_state({"mode": "auto", "targetPercent": 40})
 
         self.assertEqual(calls.count(["auto"]), 1)
+
+    def test_aggressive_uses_named_qcom_curve(self):
+        with tempfile.TemporaryDirectory() as temp:
+            helper = Path(temp) / "qcom-fan"
+            helper.touch()
+            calls = []
+
+            def command(args, timeout=10):
+                calls.append(args)
+                if args == ["json"]:
+                    return subprocess.CompletedProcess(args, 0, json.dumps(self.status("aggressive")), "")
+                if args == ["aggressive"]:
+                    return subprocess.CompletedProcess(args, 0, "", "")
+                raise AssertionError(args)
+
+            with (
+                mock.patch.object(fan_control, "HELPER", helper),
+                mock.patch.object(fan_control, "_result", side_effect=command),
+            ):
+                state = fan_control.save_state({"mode": "aggressive", "targetPercent": 40})
+
+        self.assertEqual(calls.count(["aggressive"]), 1)
+        self.assertEqual(state["mode"], "aggressive")
+        self.assertTrue(any(option["data"] == "silent" for option in state["modes"]))
+
+    def test_off_stops_fan_daemon(self):
+        with tempfile.TemporaryDirectory() as temp:
+            helper = Path(temp) / "qcom-fan"
+            helper.touch()
+            calls = []
+
+            def command(args, timeout=10):
+                calls.append(args)
+                if args == ["json"]:
+                    return subprocess.CompletedProcess(args, 0, json.dumps(self.status("off")), "")
+                if args == ["stop"]:
+                    return subprocess.CompletedProcess(args, 0, "", "")
+                raise AssertionError(args)
+
+            with (
+                mock.patch.object(fan_control, "HELPER", helper),
+                mock.patch.object(fan_control, "_result", side_effect=command),
+            ):
+                state = fan_control.save_state({"mode": "off", "targetPercent": 40})
+
+        self.assertEqual(calls.count(["stop"]), 1)
+        self.assertEqual(state["mode"], "off")
 
 
 class LsfgTests(unittest.TestCase):

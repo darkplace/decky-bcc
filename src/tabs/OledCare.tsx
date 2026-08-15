@@ -47,7 +47,13 @@ export function OledCare({ config, setConfig }: {
     return (
       <>
         <PanelSection title="OLED care">
-          <Field label="Idle dim unavailable" description={oled?.reason || "OLED care is not supported on this device."} />
+          <Field
+            label="Idle dim deferred"
+            description={
+              oled?.reason
+              || "Automatic idle dimming is planned for a future stock-native release. Use the screensaver below for burn-in mitigation in Steam."
+            }
+          />
         </PanelSection>
         {screensaverPanel}
       </>

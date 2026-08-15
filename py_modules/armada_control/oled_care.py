@@ -1,4 +1,8 @@
-"""OLED care settings — brightness cap + idle dim (no pixel refresh)."""
+"""OLED care settings — brightness cap + idle dim (no pixel refresh).
+
+Idle-dim via the legacy userdata host service is deferred. The Decky UI still
+exposes the mostly-black screensaver when the Odin OLED backlight is present.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +20,11 @@ BACKLIGHT = Path("/sys/class/backlight/ae94000.dsi.0")
 CARE_SCRIPT = Path("/userdata/system/scripts/odin-oled-care.sh")
 CARE_SERVICE = Path("/userdata/system/services/odin_oled_care")
 _LOCK = threading.RLock()
+
+# Host idle-dim (odin-oled-care.sh) is not shipped on stock images. Keep the
+# integration code for a future stock-native implementation, but do not offer
+# or start the userdata service until this flag is flipped.
+IDLE_DIM_ENABLED = False
 
 DEFAULTS: dict[str, int] = {
     "ENABLED": 1,
@@ -41,10 +50,17 @@ def _run(cmd: list[str], timeout: int = 20) -> str:
 
 
 def supported() -> bool:
+    if not IDLE_DIM_ENABLED:
+        return False
     return BACKLIGHT.is_dir() and CARE_SCRIPT.is_file() and CARE_SERVICE.is_file()
 
 
 def unsupported_reason() -> str:
+    if not IDLE_DIM_ENABLED:
+        return (
+            "Idle dim is deferred for a future stock-native implementation; "
+            "use the OLED screensaver below"
+        )
     if not BACKLIGHT.is_dir():
         return "OLED backlight was not detected"
     if not CARE_SCRIPT.is_file() or not CARE_SERVICE.is_file():

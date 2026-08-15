@@ -74,7 +74,13 @@ export function Power({ config, setConfig }: { config: Config; setConfig: Dispat
         </>
       ) : (
         <PanelSection title="Power profiles">
-          <Field label="Unavailable" description={config.powerReason || "Power profile definitions are not installed on this image."} />
+          <Field
+            label="Unavailable on this image"
+            description={
+              config.powerReason
+              || "Per-profile CPU/GPU/fan-curve editing needs odin-power. Adaptive CPU and Fan controls below remain available."
+            }
+          />
         </PanelSection>
       )}
       <AdaptiveCpu config={config} setConfig={setConfig} />

@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.2.14 - 2026-08-15
+
+- Drive paddle MangoHud toggle through stock `mangohudctl toggle no_display`
+  (Shift_R+F12 uinput fallback) instead of a userdata Python helper.
+- Inject paddle keyboard/mouse taps only via uinput; drop the
+  `odin-key-send.py` userdata fallback.
+- Cycle power from paddles through `odin-power` when present, otherwise through
+  sysfs CPU governors on stock images.
+- Surface paddle binding health (resolved backend/command) in plugin state and
+  filter unavailable actions from the binding dropdown.
+- Clarify Power-tab messaging when `odin-power` profiles are absent; Adaptive
+  CPU and `qcom-fan` remain available.
+- Document the full `qcom-fan` Silent/Auto/Aggressive/Manual/Off mode set.
+- Defer OLED idle-dim (legacy userdata `odin-oled-care`) for a future
+  stock-native implementation; keep the manual OLED screensaver.
+
+## 0.2.13 - 2026-08-15
+
+- Align Qualcomm fan controls with current `qcom-fan`: expose **Silent**,
+  **Balanced (auto)**, **Aggressive**, **Manual**, and **Off** instead of
+  collapsing every non-manual mode to Automatic.
+- Cycle rear-paddle fan actions through the same `qcom-fan` curves when the
+  helper is present; keep the older `odin-power` PWM cycle only as a fallback
+  for maintainer userdata layouts.
+- Skip power-profile paddle cycling when `/userdata/system/scripts/odin-power`
+  is missing so stock images do not no-op with a hard-coded path error.
+
 ## 0.2.12 - 2026-07-28
 
 - Add an **Emulation Settings** item to the GamepadUI settings menu for

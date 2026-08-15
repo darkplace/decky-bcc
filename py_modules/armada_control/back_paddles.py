@@ -8,7 +8,7 @@ import re
 import threading
 from pathlib import Path
 
-from .paddle_actions import ACTIONS, DEFAULT_BINDINGS, action_choices
+from .paddle_actions import ACTIONS, DEFAULT_BINDINGS, action_choices, binding_health
 from .system import atomically_write, run_cmd
 
 try:
@@ -298,6 +298,14 @@ def get_state() -> dict:
     running = _backend_running(backend) if not reason else False
     if not reason and not running:
         warning = "; ".join(filter(None, (warning, "Paddle listener is stopped; saving a binding will restart it")))
+    health = binding_health(bindings)
+    broken = [
+        f"{slot}→{info['action']} ({info.get('reason') or 'unavailable'})"
+        for slot, info in health.items()
+        if info.get("action") not in (None, "none") and not info.get("available")
+    ]
+    if broken:
+        warning = "; ".join(filter(None, (warning, "Unavailable bindings: " + ", ".join(broken))))
     return {
         "supported": not reason,
         "reason": reason,
@@ -306,8 +314,9 @@ def get_state() -> dict:
         "device": backend.get("device", {}),
         "serviceRunning": running,
         "bindings": bindings,
+        "bindingHealth": health,
         "slots": [{"data": key, "label": label} for key, label in SLOTS],
-        "actions": action_choices(),
+        "actions": action_choices(set(bindings.values())),
     }
 
 

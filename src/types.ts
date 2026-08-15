@@ -58,10 +58,11 @@ export interface FanControlState {
   targetPercent: number | null;
   rpm: number | null;
   minimumManualPercent: number;
+  modes?: { data: string; label: string }[];
 }
 
 export interface FanControlConfig {
-  mode: "auto" | "manual";
+  mode: "silent" | "auto" | "aggressive" | "manual" | "off" | string;
   targetPercent: number;
 }
 
@@ -207,6 +208,14 @@ export interface BackPaddleBindings {
   home_m2: string;
 }
 
+export interface BackPaddleActionHealth {
+  action: string;
+  available: boolean;
+  backend: string;
+  command: string[];
+  reason?: string;
+}
+
 export interface BackPaddleState {
   supported: boolean;
   reason?: string;
@@ -220,6 +229,7 @@ export interface BackPaddleState {
   };
   serviceRunning?: boolean;
   bindings: BackPaddleBindings;
+  bindingHealth?: Record<string, BackPaddleActionHealth>;
   slots: DropdownChoice[];
   actions: DropdownChoice[];
 }

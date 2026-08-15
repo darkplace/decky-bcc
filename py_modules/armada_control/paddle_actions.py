@@ -19,6 +19,15 @@ except ImportError:
 
 BRIGHTNESS_STATE = Path("/var/run/odin-brightness-saved")
 FAN_MODE_STATE = Path("/var/run/odin-fan-mode-state")
+GOVERNOR_STATE = Path("/var/run/odin-governor-cycle-state")
+MANGOHUDCTL = Path("/usr/bin/mangohudctl")
+QCOM_FAN = Path("/usr/bin/qcom-fan")
+ODIN_POWER = Path("/userdata/system/scripts/odin-power")
+CONTROLCENTER = Path("/usr/bin/batocera-controlcenter")
+MOUSE_MODE = Path("/usr/bin/batocera-mouse-mode")
+SCREENSHOT = Path("/usr/bin/batocera-screenshot")
+RECORD = Path("/usr/bin/batocera-record")
+CPUFREQ_ROOT = Path("/sys/devices/system/cpu")
 
 ACTIONS = [
     ("none", "None"),
@@ -34,8 +43,8 @@ ACTIONS = [
     ("led_toggle", "Toggle joystick LEDs"),
     ("wifi_toggle", "Toggle Wi-Fi"),
     ("bluetooth_toggle", "Toggle Bluetooth"),
-    ("fan_mode_cycle", "Fan 100/50/0/auto"),
-    ("power_profile_cycle", "Cycle power profile (eco/balanced/perf)"),
+    ("fan_mode_cycle", "Cycle fan (silent/auto/aggressive/manual 50%/off)"),
+    ("power_profile_cycle", "Cycle power (odin-power or CPU governor)"),
     ("screenshot", "Screenshot"),
     ("volume_up", "Volume up"),
     ("volume_down", "Volume down"),
@@ -84,9 +93,13 @@ def _settings_set(key: str, value: str) -> None:
     settings_set(key, value)
 
 
+def _uinput_ready() -> bool:
+    return UInput is not None and ecodes is not None and Path("/dev/uinput").exists()
+
+
 def _tap_key(code: int) -> None:
-    if UInput is None or ecodes is None:
-        _run(["python3", "/userdata/system/scripts/odin-key-send.py", str(code)])
+    """Inject a key/button via uinput only (no userdata helper scripts)."""
+    if not _uinput_ready():
         return
     try:
         ui = UInput(name="odin-paddle-keys", events={ecodes.EV_KEY: [code]})
@@ -98,7 +111,25 @@ def _tap_key(code: int) -> None:
         ui.syn()
         ui.close()
     except OSError:
-        _run(["python3", "/userdata/system/scripts/odin-key-send.py", str(code)])
+        return
+
+
+def _chord_keys(codes: list[int]) -> None:
+    if not _uinput_ready() or not codes:
+        return
+    try:
+        ui = UInput(name="odin-paddle-keys", events={ecodes.EV_KEY: codes})
+        time.sleep(0.05)
+        for code in codes:
+            ui.write(ecodes.EV_KEY, code, 1)
+            ui.syn()
+        time.sleep(0.05)
+        for code in reversed(codes):
+            ui.write(ecodes.EV_KEY, code, 0)
+            ui.syn()
+        ui.close()
+    except OSError:
+        return
 
 
 MOUSE_BUTTONS: dict[str, int] = {}
@@ -134,16 +165,316 @@ def _build_key_actions() -> dict[str, int]:
         if code is not None:
             mapping[f"key_f{i}"] = code
     extras = {
-        "key_esc": ecodes.KEY_ESC,
-        "key_enter": ecodes.KEY_ENTER,
-        "key_space": ecodes.KEY_SPACE,
-        "key_tab": ecodes.KEY_TAB,
+        "key_esc": "KEY_ESC",
+        "key_enter": "KEY_ENTER",
+        "key_space": "KEY_SPACE",
+        "key_tab": "KEY_TAB",
     }
-    mapping.update(extras)
+    for name, attr in extras.items():
+        code = getattr(ecodes, attr, None)
+        if code is not None:
+            mapping[name] = code
     return mapping
 
 
 KEY_ACTIONS = _build_key_actions()
+
+
+def _available_governors() -> list[str]:
+    path = CPUFREQ_ROOT / "cpu0" / "cpufreq" / "scaling_available_governors"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    preferred = ["powersave", "ondemand", "schedutil", "performance"]
+    present = text.split()
+    ordered = [name for name in preferred if name in present]
+    for name in present:
+        if name not in ordered:
+            ordered.append(name)
+    return ordered
+
+
+def _current_governor() -> str:
+    path = CPUFREQ_ROOT / "cpu0" / "cpufreq" / "scaling_governor"
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _set_governor(name: str) -> None:
+    for cpu in CPUFREQ_ROOT.glob("cpu[0-9]*"):
+        target = cpu / "cpufreq" / "scaling_governor"
+        try:
+            target.write_text(f"{name}\n", encoding="utf-8")
+        except OSError:
+            continue
+
+
+def _cycle_stock_governor() -> str:
+    governors = _available_governors()
+    if not governors:
+        return ""
+    current = GOVERNOR_STATE.read_text(encoding="utf-8").strip() if GOVERNOR_STATE.exists() else _current_governor()
+    try:
+        idx = governors.index(current)
+    except ValueError:
+        idx = -1
+    nxt = governors[(idx + 1) % len(governors)]
+    try:
+        GOVERNOR_STATE.write_text(nxt, encoding="utf-8")
+    except OSError:
+        pass
+    _set_governor(nxt)
+    return nxt
+
+
+def resolve_action(action: str) -> dict:
+    """Describe how a paddle action is executed and whether it can run now."""
+    action = (action or "none").strip() or "none"
+    labels = dict(ACTIONS)
+    if action not in labels:
+        return {
+            "action": action,
+            "available": False,
+            "backend": "unknown",
+            "command": [],
+            "reason": f"unknown action: {action}",
+        }
+    if action == "none":
+        return {"action": action, "available": True, "backend": "noop", "command": [], "reason": ""}
+
+    if action == "control_center":
+        ok = CONTROLCENTER.is_file()
+        return {
+            "action": action,
+            "available": ok,
+            "backend": "batocera-controlcenter",
+            "command": [str(CONTROLCENTER)],
+            "reason": "" if ok else "batocera-controlcenter is not installed",
+        }
+    if action == "mouse_toggle":
+        ok = MOUSE_MODE.is_file()
+        return {
+            "action": action,
+            "available": ok,
+            "backend": "batocera-mouse-mode",
+            "command": [str(MOUSE_MODE), "toggle"],
+            "reason": "" if ok else "batocera-mouse-mode is not installed",
+        }
+    if action in MOUSE_BUTTONS:
+        ok = _uinput_ready()
+        return {
+            "action": action,
+            "available": ok,
+            "backend": "uinput",
+            "command": ["uinput", f"BTN={MOUSE_BUTTONS[action]}"],
+            "reason": "" if ok else "python-evdev/uinput is unavailable",
+        }
+    if action == "mangohud_toggle":
+        if MANGOHUDCTL.is_file():
+            return {
+                "action": action,
+                "available": True,
+                "backend": "mangohudctl",
+                "command": [str(MANGOHUDCTL), "toggle", "no_display"],
+                "reason": "",
+            }
+        ok = _uinput_ready() and ecodes is not None
+        return {
+            "action": action,
+            "available": ok,
+            "backend": "uinput-Shift_R+F12",
+            "command": ["uinput", "KEY_RIGHTSHIFT+KEY_F12"],
+            "reason": "" if ok else "mangohudctl and uinput are unavailable",
+        }
+    if action == "keyboard_toggle":
+        ok = CONTROLCENTER.is_file()
+        return {
+            "action": action,
+            "available": ok,
+            "backend": "batocera-controlcenter",
+            "command": [str(CONTROLCENTER), "keyboard"],
+            "reason": "" if ok else "batocera-controlcenter is not installed",
+        }
+    if action == "mute_toggle":
+        return {
+            "action": action,
+            "available": True,
+            "backend": "batocera-audio",
+            "command": ["batocera-audio", "setSystemVolume", "mute-toggle"],
+            "reason": "",
+        }
+    if action in ("volume_up", "volume_down"):
+        return {
+            "action": action,
+            "available": True,
+            "backend": "batocera-audio",
+            "command": ["batocera-audio", "setSystemVolume", "+10" if action == "volume_up" else "-10"],
+            "reason": "",
+        }
+    if action == "brightness_min_toggle":
+        return {
+            "action": action,
+            "available": True,
+            "backend": "batocera-brightness",
+            "command": ["batocera-brightness"],
+            "reason": "",
+        }
+    if action == "led_toggle":
+        return {
+            "action": action,
+            "available": True,
+            "backend": "joystick_led",
+            "command": ["armada_control.joystick_led.toggle"],
+            "reason": "",
+        }
+    if action == "wifi_toggle":
+        if Path("/usr/bin/nmcli").is_file():
+            return {
+                "action": action,
+                "available": True,
+                "backend": "nmcli",
+                "command": ["nmcli", "radio", "wifi", "toggle"],
+                "reason": "",
+            }
+        return {
+            "action": action,
+            "available": True,
+            "backend": "batocera-wifi",
+            "command": ["batocera-wifi", "enable|disable"],
+            "reason": "",
+        }
+    if action == "bluetooth_toggle":
+        return {
+            "action": action,
+            "available": True,
+            "backend": "batocera-bluetooth",
+            "command": ["batocera-bluetooth", "enable|disable"],
+            "reason": "",
+        }
+    if action == "fan_mode_cycle":
+        if QCOM_FAN.is_file():
+            return {
+                "action": action,
+                "available": True,
+                "backend": "qcom-fan",
+                "command": [str(QCOM_FAN), "silent|auto|aggressive|set 50|stop"],
+                "reason": "",
+            }
+        if ODIN_POWER.is_file():
+            return {
+                "action": action,
+                "available": True,
+                "backend": "odin-power",
+                "command": [str(ODIN_POWER), "fan", "cycle"],
+                "reason": "",
+            }
+        return {
+            "action": action,
+            "available": False,
+            "backend": "none",
+            "command": [],
+            "reason": "neither qcom-fan nor odin-power is installed",
+        }
+    if action == "power_profile_cycle":
+        if ODIN_POWER.is_file():
+            return {
+                "action": action,
+                "available": True,
+                "backend": "odin-power",
+                "command": [str(ODIN_POWER), "profile", "cycle"],
+                "reason": "",
+            }
+        governors = _available_governors()
+        if governors:
+            return {
+                "action": action,
+                "available": True,
+                "backend": "cpufreq-governor",
+                "command": ["sysfs", "scaling_governor", "|".join(governors)],
+                "reason": "",
+            }
+        return {
+            "action": action,
+            "available": False,
+            "backend": "none",
+            "command": [],
+            "reason": "odin-power missing and no CPU governors exposed",
+        }
+    if action == "screenshot":
+        if SCREENSHOT.is_file():
+            return {
+                "action": action,
+                "available": True,
+                "backend": "batocera-screenshot",
+                "command": [str(SCREENSHOT)],
+                "reason": "",
+            }
+        if RECORD.is_file():
+            return {
+                "action": action,
+                "available": True,
+                "backend": "batocera-record",
+                "command": [str(RECORD), "screenshot"],
+                "reason": "",
+            }
+        return {
+            "action": action,
+            "available": False,
+            "backend": "none",
+            "command": [],
+            "reason": "screenshot helper is not installed",
+        }
+    if action in KEY_ACTIONS or action.startswith("key_"):
+        ok = _uinput_ready() and action in KEY_ACTIONS
+        return {
+            "action": action,
+            "available": ok,
+            "backend": "uinput",
+            "command": ["uinput", f"KEY={KEY_ACTIONS.get(action, action)}"],
+            "reason": "" if ok else "python-evdev/uinput is unavailable",
+        }
+    if action in MOUSE_BUTTONS or action in ("mouse_left", "mouse_right", "mouse_middle"):
+        ok = _uinput_ready() and action in MOUSE_BUTTONS
+        return {
+            "action": action,
+            "available": ok,
+            "backend": "uinput",
+            "command": ["uinput", f"BTN={MOUSE_BUTTONS.get(action, action)}"],
+            "reason": "" if ok else "python-evdev/uinput is unavailable",
+        }
+    return {
+        "action": action,
+        "available": False,
+        "backend": "unimplemented",
+        "command": [],
+        "reason": "action has no resolver",
+    }
+
+
+def action_available(action: str) -> bool:
+    return bool(resolve_action(action).get("available"))
+
+
+def binding_health(bindings: dict) -> dict[str, dict]:
+    """Map each paddle slot to its resolved command health."""
+    out: dict[str, dict] = {}
+    for slot, action in (bindings or {}).items():
+        info = resolve_action(str(action or "none"))
+        out[str(slot)] = info
+    return out
+
+
+def action_choices(include: set[str] | None = None) -> list[dict[str, str]]:
+    """Dropdown entries: always-available actions plus currently bound ones."""
+    keep = set(include or ())
+    choices = []
+    for key, label in ACTIONS:
+        if key == "none" or key in keep or action_available(key):
+            choices.append({"data": key, "label": label})
+    return choices
 
 
 def run_action(action: str) -> None:
@@ -154,21 +485,28 @@ def run_action(action: str) -> None:
         return
 
     if action == "control_center":
-        _run(["/usr/bin/batocera-controlcenter"])
+        _run([str(CONTROLCENTER)])
         return
 
     if action == "mouse_toggle":
-        _run(["/usr/bin/batocera-mouse-mode", "toggle"])
+        _run([str(MOUSE_MODE), "toggle"])
         return
 
     if action == "mangohud_toggle":
-        _run(["python3", "/userdata/system/scripts/odin-mangohud-toggle.py"])
+        if MANGOHUDCTL.is_file():
+            _run([str(MANGOHUDCTL), "toggle", "no_display"])
+            return
+        if ecodes is not None:
+            shift = getattr(ecodes, "KEY_RIGHTSHIFT", None)
+            f12 = getattr(ecodes, "KEY_F12", None)
+            if shift is not None and f12 is not None:
+                _chord_keys([shift, f12])
         return
 
     if action == "keyboard_toggle":
-        out = _run(["/usr/bin/batocera-controlcenter", "keyboard"])
+        out = _run([str(CONTROLCENTER), "keyboard"])
         if not out or "Usage" in out or "error" in out.lower():
-            _run(["/usr/bin/batocera-controlcenter", "virtualkeyboard"])
+            _run([str(CONTROLCENTER), "virtualkeyboard"])
         return
 
     if action == "mute_toggle":
@@ -228,29 +566,51 @@ def run_action(action: str) -> None:
         return
 
     if action == "fan_mode_cycle":
-        order = ["255", "128", "0", "auto"]
-        current = FAN_MODE_STATE.read_text(encoding="utf-8").strip() if FAN_MODE_STATE.exists() else "auto"
-        try:
-            idx = order.index(current)
-        except ValueError:
-            idx = -1
-        nxt = order[(idx + 1) % len(order)]
-        if nxt == "auto":
-            FAN_MODE_STATE.unlink(missing_ok=True)
-        else:
+        # Prefer native qcom-fan curves when available (stock Batocera image).
+        # Fall back to maintainer userdata odin-power PWM presets when present.
+        if QCOM_FAN.is_file():
+            order = ["silent", "auto", "aggressive", "50", "off"]
+            current = FAN_MODE_STATE.read_text(encoding="utf-8").strip() if FAN_MODE_STATE.exists() else "auto"
+            try:
+                idx = order.index(current)
+            except ValueError:
+                idx = -1
+            nxt = order[(idx + 1) % len(order)]
             FAN_MODE_STATE.write_text(nxt, encoding="utf-8")
-        _run(["/userdata/system/scripts/odin-power", "fan", nxt])
+            if nxt == "50":
+                _run([str(QCOM_FAN), "set", "50"])
+            elif nxt == "off":
+                _run([str(QCOM_FAN), "stop"])
+            else:
+                _run([str(QCOM_FAN), nxt])
+            return
+        if ODIN_POWER.is_file():
+            order = ["255", "128", "0", "auto"]
+            current = FAN_MODE_STATE.read_text(encoding="utf-8").strip() if FAN_MODE_STATE.exists() else "auto"
+            try:
+                idx = order.index(current)
+            except ValueError:
+                idx = -1
+            nxt = order[(idx + 1) % len(order)]
+            if nxt == "auto":
+                FAN_MODE_STATE.unlink(missing_ok=True)
+            else:
+                FAN_MODE_STATE.write_text(nxt, encoding="utf-8")
+            _run([str(ODIN_POWER), "fan", nxt])
         return
 
     if action == "power_profile_cycle":
-        _run(["/userdata/system/scripts/odin-power", "profile", "cycle"])
+        if ODIN_POWER.is_file():
+            _run([str(ODIN_POWER), "profile", "cycle"])
+            return
+        _cycle_stock_governor()
         return
 
     if action == "screenshot":
-        if Path("/usr/bin/batocera-screenshot").exists():
-            _run(["/usr/bin/batocera-screenshot"])
+        if SCREENSHOT.exists():
+            _run([str(SCREENSHOT)])
         else:
-            _run(["/usr/bin/batocera-record", "screenshot"])
+            _run([str(RECORD), "screenshot"])
         return
 
     if action in KEY_ACTIONS:
@@ -260,7 +620,3 @@ def run_action(action: str) -> None:
     if action in MOUSE_BUTTONS:
         _tap_key(MOUSE_BUTTONS[action])
         return
-
-
-def action_choices() -> list[dict[str, str]]:
-    return [{"data": key, "label": label} for key, label in ACTIONS]

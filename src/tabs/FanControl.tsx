@@ -5,10 +5,15 @@ import { getFanControl, saveFanControl } from "../backend";
 import { SelectEdit, SliderEdit } from "../components/widgets";
 import type { Config, FanControlConfig } from "../types";
 
-const MODES = [
-  { data: "auto", label: "Automatic temperature curve" },
+const FALLBACK_MODES = [
+  { data: "silent", label: "Silent curve" },
+  { data: "auto", label: "Balanced curve" },
+  { data: "aggressive", label: "Aggressive curve" },
   { data: "manual", label: "Manual override" },
+  { data: "off", label: "Off" },
 ];
+
+const KNOWN_MODES = new Set(FALLBACK_MODES.map((entry) => entry.data));
 
 export function FanControl({ config, setConfig }: {
   config: Config;
@@ -41,7 +46,8 @@ export function FanControl({ config, setConfig }: {
   }, [setConfig]);
 
   if (!state?.supported) return null;
-  const mode = state.mode === "manual" ? "manual" : "auto";
+  const modeOptions = (state.modes && state.modes.length ? state.modes : FALLBACK_MODES);
+  const mode = KNOWN_MODES.has(state.mode) ? state.mode : "auto";
   const minimum = state.minimumManualPercent || 20;
   const target = Math.max(minimum, Math.min(100, Math.round(state.targetPercent ?? state.percent ?? 40)));
   const telemetry = [
@@ -89,12 +95,12 @@ export function FanControl({ config, setConfig }: {
     <PanelSection title="Fan control">
       <Field
         label="Batocera qcom-fan"
-        description="Uses the same native auto/manual controls as Batocera Control Center outside Steam. Automatic is recommended for normal use."
+        description="Same curves as Batocera Control Center / CLI: silent, balanced, aggressive, manual, or off."
       />
       <SelectEdit
         label="Mode"
         value={mode}
-        options={MODES}
+        options={modeOptions}
         disabled={!state.controllable}
         onChange={(nextMode) => apply({ mode: nextMode, targetPercent: target })}
       />
@@ -111,7 +117,7 @@ export function FanControl({ config, setConfig }: {
           />
           <Field
             label="Manual override active"
-            description="The temperature curve is disabled until Automatic is selected again. Watch temperature during sustained loads."
+            description="Temperature curves are disabled until Silent, Balanced, or Aggressive is selected again."
           />
         </>
       ) : null}

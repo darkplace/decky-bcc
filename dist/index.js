@@ -333,9 +333,23 @@ function BackPaddles({ config, setConfig }) {
     const bindings = bp.bindings;
     const slots = bp.slots || [];
     const actions = bp.actions || [];
+    const health = bp.bindingHealth || {};
     const mouseModeAssigned = Object.values(bindings).includes("mouse_toggle");
     const backend = bp.source === "rsinput" ? "RSInput events + combos" : "Legacy GPIO + combos";
     const device = [bp.device?.name, bp.device?.path].filter(Boolean).join(" — ");
+    const codeMap = bp.device?.m1Code != null && bp.device?.m2Code != null
+        ? `M1 code ${bp.device.m1Code}, M2 code ${bp.device.m2Code}`
+        : "";
+    const activeHealth = Object.entries(bindings)
+        .filter(([, action]) => action && action !== "none")
+        .map(([slot, action]) => {
+        const info = health[slot];
+        if (!info)
+            return `${slot}→${action}`;
+        if (!info.available)
+            return `${slot}→${action} unavailable`;
+        return `${slot}→${info.backend}`;
+    });
     const apply = (next) => {
         const request = ++revision.current;
         setConfig((current) => (current && current.backPaddles ? { ...current, backPaddles: { ...current.backPaddles, bindings: next } } : current));
@@ -354,7 +368,7 @@ function BackPaddles({ config, setConfig }) {
     const update = (slot, action) => {
         apply({ ...bindings, [slot]: action });
     };
-    return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsxs(DFL.PanelSection, { title: "Back paddles (M1 / M2)", children: [SP_JSX.jsx(DFL.Field, { label: backend, description: device || "AYN rear-paddle input", children: "Tap actions fire on release. Chords fire once while held. The listener observes without grabbing, so Steam, ES, and emulators still receive both paddles." }), bp.source === "rsinput" ? (SP_JSX.jsx(DFL.Field, { label: "Batocera hotkeys coexist", description: "Home/Hotkey + paddle is left to Batocera and suppresses the paddle tap action, preventing both mappings from firing together." })) : null] }), SP_JSX.jsxs(DFL.PanelSection, { title: "Bindings", children: [bp.warning ? SP_JSX.jsx(DFL.Field, { label: "Warning", description: bp.warning }) : null, mouseModeAssigned ? (SP_JSX.jsx(DFL.Field, { label: "Mouse mode pauses gamepad navigation", description: "Press the assigned paddle again to restore normal controls before changing or clearing its binding." })) : null, slots.map((slot) => (SP_JSX.jsx(SelectEdit, { label: slot.label, value: bindings[slot.data] || "none", options: actions, onChange: (value) => update(slot.data, value) }, slot.data)))] })] }));
+    return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsxs(DFL.PanelSection, { title: "Back paddles (M1 / M2)", children: [SP_JSX.jsx(DFL.Field, { label: backend, description: [device || "AYN rear-paddle input", codeMap].filter(Boolean).join(" · "), children: "Tap actions fire on release. Chords fire once while held. The listener observes without grabbing, so Steam, ES, and emulators still receive both paddles." }), bp.source === "rsinput" ? (SP_JSX.jsx(DFL.Field, { label: "Batocera hotkeys coexist", description: "Home/Hotkey + paddle is left to Batocera and suppresses the paddle tap action, preventing both mappings from firing together." })) : null, activeHealth.length ? (SP_JSX.jsx(DFL.Field, { label: "Binding targets", description: activeHealth.join(" · ") })) : null] }), SP_JSX.jsxs(DFL.PanelSection, { title: "Bindings", children: [bp.warning ? SP_JSX.jsx(DFL.Field, { label: "Warning", description: bp.warning }) : null, mouseModeAssigned ? (SP_JSX.jsx(DFL.Field, { label: "Mouse mode pauses gamepad navigation", description: "Press the assigned paddle again to restore normal controls before changing or clearing its binding." })) : null, slots.map((slot) => (SP_JSX.jsx(SelectEdit, { label: slot.label, value: bindings[slot.data] || "none", options: actions, onChange: (value) => update(slot.data, value) }, slot.data)))] })] }));
 }
 
 const GLOBAL_RESOLUTION_KEY = "gamescope_game_resolution_global";
@@ -1438,7 +1452,8 @@ function OledCare({ config, setConfig }) {
                         DFL.Navigation.CloseSideMenus();
                 } })] })) : null;
     if (!oled?.supported) {
-        return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.PanelSection, { title: "OLED care", children: SP_JSX.jsx(DFL.Field, { label: "Idle dim unavailable", description: oled?.reason || "OLED care is not supported on this device." }) }), screensaverPanel] }));
+        return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.PanelSection, { title: "OLED care", children: SP_JSX.jsx(DFL.Field, { label: "Idle dim deferred", description: oled?.reason
+                            || "Automatic idle dimming is planned for a future stock-native release. Use the screensaver below for burn-in mitigation in Steam." }) }), screensaverPanel] }));
     }
     const cfg = oled.config;
     const runtime = oled.runtime;
@@ -1577,10 +1592,14 @@ function AdaptiveCpu({ config, setConfig }) {
     return (SP_JSX.jsxs(DFL.PanelSection, { title: state.kind === "tdp" ? "Adaptive TDP" : "Adaptive CPU", children: [state.kind === "tdp" ? (SP_JSX.jsx(DFL.Field, { label: "Batocera package-power limiter", description: "Adaptive TDP lowers package power in one-watt steps while frame rate has headroom and raises it when FPS falls. Your existing TDP setting remains the ceiling; this control does not replace or override the normal TDP slider." })) : (SP_JSX.jsx(DFL.Field, { label: "Batocera CPU limiter", description: "Thermal guard reacts to temperature and fan load. Adaptive FPS also reduces the CPU ceiling while frame rate has headroom, then releases it when FPS falls. It never overclocks." })), SP_JSX.jsx(SelectEdit, { label: "Mode", value: state.mode, options: modeOptions, onChange: (mode) => apply({ mode }) }), state.kind === "cpu" ? (SP_JSX.jsx(SelectEdit, { label: "CPU ceiling", value: state.globalCap, options: capOptions, onChange: (globalCap) => apply({ globalCap }) })) : null, SP_JSX.jsx(SelectEdit, { label: "Target frame rate", value: state.globalTargetFps, options: targetOptions, disabled: state.mode !== "adaptive", onChange: (globalTargetFps) => apply({ globalTargetFps }) }), SP_JSX.jsx(DFL.Field, { label: "Runtime", description: runtimeLabel(state) }), SP_JSX.jsx(DFL.Field, { label: "FPS source", description: `${state.dataSource}. Steam uses Gamescope statistics; ES-launched emulators use Batocera's hidden FPS sampler. This is independent of the visible MangoHud performance overlay.` }), message ? SP_JSX.jsx(DFL.Field, { label: "Last change", description: message }) : null] }));
 }
 
-const MODES = [
-    { data: "auto", label: "Automatic temperature curve" },
+const FALLBACK_MODES = [
+    { data: "silent", label: "Silent curve" },
+    { data: "auto", label: "Balanced curve" },
+    { data: "aggressive", label: "Aggressive curve" },
     { data: "manual", label: "Manual override" },
+    { data: "off", label: "Off" },
 ];
+const KNOWN_MODES = new Set(FALLBACK_MODES.map((entry) => entry.data));
 function FanControl({ config, setConfig }) {
     const revision = SP_REACT.useRef(0);
     const timer = SP_REACT.useRef(undefined);
@@ -1611,7 +1630,8 @@ function FanControl({ config, setConfig }) {
     }, [setConfig]);
     if (!state?.supported)
         return null;
-    const mode = state.mode === "manual" ? "manual" : "auto";
+    const modeOptions = (state.modes && state.modes.length ? state.modes : FALLBACK_MODES);
+    const mode = KNOWN_MODES.has(state.mode) ? state.mode : "auto";
     const minimum = state.minimumManualPercent || 20;
     const target = Math.max(minimum, Math.min(100, Math.round(state.targetPercent ?? state.percent ?? 40)));
     const telemetry = [
@@ -1660,7 +1680,7 @@ function FanControl({ config, setConfig }) {
         else
             commit();
     };
-    return (SP_JSX.jsxs(DFL.PanelSection, { title: "Fan control", children: [SP_JSX.jsx(DFL.Field, { label: "Batocera qcom-fan", description: "Uses the same native auto/manual controls as Batocera Control Center outside Steam. Automatic is recommended for normal use." }), SP_JSX.jsx(SelectEdit, { label: "Mode", value: mode, options: MODES, disabled: !state.controllable, onChange: (nextMode) => apply({ mode: nextMode, targetPercent: target }) }), mode === "manual" ? (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(SliderEdit, { label: "Manual speed", value: target, min: minimum, max: 100, step: 5, format: (value) => `${Math.round(value)}%`, onChange: (targetPercent) => apply({ mode: "manual", targetPercent: Math.round(targetPercent) }, 200) }), SP_JSX.jsx(DFL.Field, { label: "Manual override active", description: "The temperature curve is disabled until Automatic is selected again. Watch temperature during sustained loads." })] })) : null, SP_JSX.jsx(DFL.Field, { label: "Current fan", description: telemetry }), !state.controllable ? SP_JSX.jsx(DFL.Field, { label: "Read only", description: state.reason }) : null, message ? SP_JSX.jsx(DFL.Field, { label: "Last change", description: message }) : null] }));
+    return (SP_JSX.jsxs(DFL.PanelSection, { title: "Fan control", children: [SP_JSX.jsx(DFL.Field, { label: "Batocera qcom-fan", description: "Same curves as Batocera Control Center / CLI: silent, balanced, aggressive, manual, or off." }), SP_JSX.jsx(SelectEdit, { label: "Mode", value: mode, options: modeOptions, disabled: !state.controllable, onChange: (nextMode) => apply({ mode: nextMode, targetPercent: target }) }), mode === "manual" ? (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(SliderEdit, { label: "Manual speed", value: target, min: minimum, max: 100, step: 5, format: (value) => `${Math.round(value)}%`, onChange: (targetPercent) => apply({ mode: "manual", targetPercent: Math.round(targetPercent) }, 200) }), SP_JSX.jsx(DFL.Field, { label: "Manual override active", description: "Temperature curves are disabled until Silent, Balanced, or Aggressive is selected again." })] })) : null, SP_JSX.jsx(DFL.Field, { label: "Current fan", description: telemetry }), !state.controllable ? SP_JSX.jsx(DFL.Field, { label: "Read only", description: state.reason }) : null, message ? SP_JSX.jsx(DFL.Field, { label: "Last change", description: message }) : null] }));
 }
 
 const underclocks = [
@@ -1708,7 +1728,8 @@ function Power({ config, setConfig }) {
     };
     const underclockLevel = p.cpu_underclock || "";
     const supportsUnderclockPresets = !!config.power.underclocks?.[config.cpuDeviceClass];
-    return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [profilesSupported ? (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.PanelSection, { title: "EDIT POWER PROFILE", children: SP_JSX.jsx(SelectEdit, { value: profile, options: profiles, onChange: setProfile }) }), SP_JSX.jsxs(DFL.PanelSection, { title: "PROFILE SETTINGS", children: [SP_JSX.jsx(SelectEdit, { label: "Fan Curve", value: p.fan_curve, options: fanCurves, onChange: (v) => setProfileValue("fan_curve", v) }), supportsUnderclockPresets ? (SP_JSX.jsx(SelectEdit, { label: "CPU Underclock", value: underclockLevel, options: underclocks, onChange: (v) => setProfileValue("cpu_underclock", v) })) : (SP_JSX.jsx(SliderEdit, { label: "CPU Max (%)", value: Math.round(Number(p.cpu_max || 0) * 100), min: 35, max: 100, step: 1, onChange: (v) => setProfileValue("cpu_max", (v / 100).toFixed(2)) })), SP_JSX.jsx(SliderEdit, { label: "GPU Min (%)", value: Math.round(Number(p.gpu_min || 0) * 100), min: 0, max: 100, step: 1, onChange: (v) => setGpuValue("gpu_min", (v / 100).toFixed(2)) }), SP_JSX.jsx(SliderEdit, { label: "GPU Max (%)", value: Math.round(Number(p.gpu_max || 0) * 100), min: 35, max: 100, step: 1, onChange: (v) => setGpuValue("gpu_max", (v / 100).toFixed(2)) }), SP_JSX.jsx("div", { className: "armada-reset-row", children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: resetProfile, children: "Reset to Default" }) })] })] })) : (SP_JSX.jsx(DFL.PanelSection, { title: "Power profiles", children: SP_JSX.jsx(DFL.Field, { label: "Unavailable", description: config.powerReason || "Power profile definitions are not installed on this image." }) })), SP_JSX.jsx(AdaptiveCpu, { config: config, setConfig: setConfig }), SP_JSX.jsx(FanControl, { config: config, setConfig: setConfig })] }));
+    return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [profilesSupported ? (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.PanelSection, { title: "EDIT POWER PROFILE", children: SP_JSX.jsx(SelectEdit, { value: profile, options: profiles, onChange: setProfile }) }), SP_JSX.jsxs(DFL.PanelSection, { title: "PROFILE SETTINGS", children: [SP_JSX.jsx(SelectEdit, { label: "Fan Curve", value: p.fan_curve, options: fanCurves, onChange: (v) => setProfileValue("fan_curve", v) }), supportsUnderclockPresets ? (SP_JSX.jsx(SelectEdit, { label: "CPU Underclock", value: underclockLevel, options: underclocks, onChange: (v) => setProfileValue("cpu_underclock", v) })) : (SP_JSX.jsx(SliderEdit, { label: "CPU Max (%)", value: Math.round(Number(p.cpu_max || 0) * 100), min: 35, max: 100, step: 1, onChange: (v) => setProfileValue("cpu_max", (v / 100).toFixed(2)) })), SP_JSX.jsx(SliderEdit, { label: "GPU Min (%)", value: Math.round(Number(p.gpu_min || 0) * 100), min: 0, max: 100, step: 1, onChange: (v) => setGpuValue("gpu_min", (v / 100).toFixed(2)) }), SP_JSX.jsx(SliderEdit, { label: "GPU Max (%)", value: Math.round(Number(p.gpu_max || 0) * 100), min: 35, max: 100, step: 1, onChange: (v) => setGpuValue("gpu_max", (v / 100).toFixed(2)) }), SP_JSX.jsx("div", { className: "armada-reset-row", children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: resetProfile, children: "Reset to Default" }) })] })] })) : (SP_JSX.jsx(DFL.PanelSection, { title: "Power profiles", children: SP_JSX.jsx(DFL.Field, { label: "Unavailable on this image", description: config.powerReason
+                        || "Per-profile CPU/GPU/fan-curve editing needs odin-power. Adaptive CPU and Fan controls below remain available." }) })), SP_JSX.jsx(AdaptiveCpu, { config: config, setConfig: setConfig }), SP_JSX.jsx(FanControl, { config: config, setConfig: setConfig })] }));
 }
 
 const CAPTURE_CONTROLS = ["left_x", "left_y", "right_x", "right_y", "left_trigger", "right_trigger"];
