@@ -612,6 +612,21 @@ class PaddleActionTests(unittest.TestCase):
         self.assertIn(["batocera-wifi", "enable"], commands)
         self.assertIn(["batocera-bluetooth", "disable"], commands)
 
+    def test_keyboard_toggle_uses_onscreen_keyboard(self):
+        commands = []
+        with tempfile.TemporaryDirectory() as temp:
+            osk = Path(temp) / "onscreen-keyboard"
+            osk.write_text("#!/bin/sh\n", encoding="utf-8")
+            with (
+                mock.patch.object(paddle_actions, "ONSCREEN_KEYBOARD", osk),
+                mock.patch.object(paddle_actions, "_run", side_effect=lambda command: commands.append(command) or ""),
+            ):
+                paddle_actions.run_action("keyboard_toggle")
+                info = paddle_actions.resolve_action("keyboard_toggle")
+        self.assertEqual(commands, [[str(osk), "toggle"]])
+        self.assertTrue(info["available"])
+        self.assertEqual(info["backend"], "onscreen-keyboard")
+
     def test_corrupt_saved_brightness_does_not_crash(self):
         with tempfile.TemporaryDirectory() as temp:
             saved = Path(temp) / "brightness"

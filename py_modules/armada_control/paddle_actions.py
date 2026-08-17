@@ -25,6 +25,7 @@ MANGOHUDCTL = Path("/usr/bin/mangohudctl")
 QCOM_FAN = Path("/usr/bin/qcom-fan")
 ODIN_POWER = Path("/userdata/system/scripts/odin-power")
 CONTROLCENTER = Path("/usr/bin/batocera-controlcenter")
+ONSCREEN_KEYBOARD = Path("/usr/bin/onscreen-keyboard")
 MOUSE_MODE = Path("/usr/bin/batocera-mouse-mode")
 SCREENSHOT = Path("/usr/bin/batocera-screenshot")
 RECORD = Path("/usr/bin/batocera-record")
@@ -309,13 +310,13 @@ def resolve_action(action: str) -> dict:
             "reason": "" if ok else "mangohudctl and uinput are unavailable",
         }
     if action == "keyboard_toggle":
-        ok = CONTROLCENTER.is_file()
+        ok = ONSCREEN_KEYBOARD.is_file()
         return {
             "action": action,
             "available": ok,
-            "backend": "batocera-controlcenter",
-            "command": [str(CONTROLCENTER), "keyboard"],
-            "reason": "" if ok else "batocera-controlcenter is not installed",
+            "backend": "onscreen-keyboard",
+            "command": [str(ONSCREEN_KEYBOARD), "toggle"],
+            "reason": "" if ok else "onscreen-keyboard is not installed",
         }
     if action == "mute_toggle":
         return {
@@ -550,9 +551,8 @@ def run_action(action: str) -> None:
         return
 
     if action == "keyboard_toggle":
-        out = _run([str(CONTROLCENTER), "keyboard"])
-        if not out or "Usage" in out or "error" in out.lower():
-            _run([str(CONTROLCENTER), "virtualkeyboard"])
+        if ONSCREEN_KEYBOARD.is_file():
+            _run([str(ONSCREEN_KEYBOARD), "toggle"])
         return
 
     if action == "mute_toggle":

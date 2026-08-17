@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.28 - 2026-08-18
+
+- M1/M2 **On-screen keyboard** paddle action calls `/usr/bin/onscreen-keyboard toggle`
+  instead of `batocera-controlcenter keyboard`, so toggling the OSK no longer opens
+  Control Center on Odin 3.
+
 ## 0.2.27 - 2026-08-17
 
 - OLED pixel refresher covers the full Steam GamepadUI panel (header/footer
