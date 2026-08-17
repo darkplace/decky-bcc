@@ -3,7 +3,7 @@ import { ButtonItem, Field, PanelSection } from "@decky/ui";
 import { useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { setCpuGovernor as applyCpuGovernor } from "../backend";
-import { SelectEdit, SliderEdit } from "../components/widgets";
+import { Hint, SelectEdit, SliderEdit } from "../components/widgets";
 import { clone, titleCase, update } from "../lib/util";
 import type { Config, PowerProfile } from "../types";
 import { AdaptiveCpu } from "./AdaptiveCpu";
@@ -78,14 +78,24 @@ export function Power({ config, setConfig }: { config: Config; setConfig: Dispat
           <PanelSection title="EDIT POWER PROFILE">
             <SelectEdit value={profile} options={profiles} onChange={selectProfile} />
             {stockBackend ? (
-              <Field
+              <Hint
                 label="Stock backend"
-                description="Applies CPU governor + qcom-fan for the selected profile. CPU%/GPU% limits are kept for odin-power images and are not written to hardware here."
+                description="Applies CPU governor + qcom-fan for this profile. CPU%/GPU% limits are not written to hardware here."
               />
             ) : null}
           </PanelSection>
           <PanelSection title="PROFILE SETTINGS">
-            <SelectEdit label="Fan Curve" value={p.fan_curve} options={fanCurves} onChange={(v) => setProfileValue("fan_curve", v)} />
+            <SelectEdit
+              label="Fan mode (Control Center)"
+              labelBelow
+              value={p.fan_curve}
+              options={fanCurves}
+              onChange={(v) => setProfileValue("fan_curve", v)}
+            />
+            <Hint
+              label="Shared with Home+A"
+              description="Maps this profile onto Control Center Fan Mode. It does not edit curve points."
+            />
             {governorOptions.length ? (
               <SelectEdit
                 label="CPU Governor"
@@ -130,7 +140,7 @@ export function Power({ config, setConfig }: { config: Config; setConfig: Dispat
             options={governorOptions}
             onChange={setCpuGovernor}
           />
-          <Field label="Note" description="Applies immediately via sysfs. Rear-paddle Cycle power walks the same governors." />
+          <Hint label="Note" description="Applies immediately via sysfs. Rear-paddle Cycle power walks the same governors." />
         </PanelSection>
       ) : null}
       <AdaptiveCpu config={config} setConfig={setConfig} />

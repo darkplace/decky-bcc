@@ -9,6 +9,10 @@ export function setOledScreensaverActive(value: boolean) {
   for (const listener of listeners) listener(active);
 }
 
+export function getOledScreensaverActive() {
+  return active;
+}
+
 export function useOledScreensaverActive() {
   const [value, setValue] = useState(active);
   useEffect(() => {

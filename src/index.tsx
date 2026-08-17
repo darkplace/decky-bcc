@@ -1,5 +1,6 @@
 import { definePlugin, routerHook } from "@decky/api";
 import { getCompatApplied, getConfig, getInstalledGames, saveCompatApplied } from "./backend";
+import { openOledRefresher } from "./components/OledRefresherOverlay";
 import { OledScreensaverOverlay } from "./components/OledScreensaverOverlay";
 import { Content } from "./Content";
 import {
@@ -9,11 +10,15 @@ import {
   sweepInstalledGames,
 } from "./lib/steamCompat";
 import { applyEmulationMenuPatch, refreshEmulationManagedAppids } from "./lib/emulationMenu";
+import { setOledRefresherActive } from "./lib/oledRefresher";
 import { setOledScreensaverActive } from "./lib/oledScreensaver";
+import { startOledIdleWatch, updateOledIdleConfig } from "./lib/oledIdleWatch";
 
 export default definePlugin(() => {
+  (window as any).__batoceraOpenOledRefresher = openOledRefresher;
   routerHook.addGlobalComponent("BatoceraControlOledSaver", () => <OledScreensaverOverlay />);
   const emulationMenuPatch = applyEmulationMenuPatch();
+  const stopOledIdleWatch = startOledIdleWatch();
   void refreshEmulationManagedAppids().catch(() => {});
   const emulationManifestTimer = window.setInterval(
     () => void refreshEmulationManagedAppids().catch(() => {}),
@@ -28,6 +33,8 @@ export default definePlugin(() => {
   Promise.all([getConfig(), getInstalledGames(), handledRequest])
     .then(([config, games, handled]) => {
       if (cancelled) return;
+      const oled = config.oledCare?.config;
+      if (oled) updateOledIdleConfig(oled);
       configureCompatPolicy(
         config.tweaks?.global?.windowsCompatTool,
         handled.loaded && config.tweaks?.global?.autoApplyCompat !== false,
@@ -49,8 +56,10 @@ export default definePlugin(() => {
       cancelled = true;
       unregisterDownloadWatcher();
       window.clearInterval(emulationManifestTimer);
+      stopOledIdleWatch();
       emulationMenuPatch.unpatch();
       setOledScreensaverActive(false);
+      setOledRefresherActive(false);
       routerHook.removeGlobalComponent("BatoceraControlOledSaver");
     },
     icon: (

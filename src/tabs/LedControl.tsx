@@ -2,7 +2,7 @@ import { Field, PanelSection } from "@decky/ui";
 import { useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { saveJoystickLed } from "../backend";
-import { SelectEdit, SliderEdit } from "../components/widgets";
+import { Hint, SelectEdit, SliderEdit } from "../components/widgets";
 import type { Config, JoystickLedConfig, JoystickLedSide } from "../types";
 
 const DEFAULT_BRIGHTNESS = 70;
@@ -87,9 +87,9 @@ export function LedControl({ config, setConfig }: {
   return (
     <>
       <PanelSection title="Joystick LEDs">
-        <Field
+        <Hint
           label="Batocera service"
-          children="Uses batocera-led-handheld (same as EmulationStation). Left and right rings share color and mode."
+          children="Uses batocera-led-handheld (same as EmulationStation). Both rings share color and mode."
         />
       </PanelSection>
       <PanelSection title="L/R rings">

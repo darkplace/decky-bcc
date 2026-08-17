@@ -7,6 +7,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from .es_paddle_hotkeys import ES_ONLY_ACTIONS
 from .system import settings_set
 
 try:
@@ -29,25 +30,34 @@ SCREENSHOT = Path("/usr/bin/batocera-screenshot")
 RECORD = Path("/usr/bin/batocera-record")
 CPUFREQ_ROOT = Path("/sys/devices/system/cpu")
 
+_STEAM_ES_ACTIONS = {
+    "control_center",
+    "screenshot",
+    "mute_toggle",
+    "volume_up",
+    "volume_down",
+}
+
 ACTIONS = [
     ("none", "None"),
-    ("control_center", "Batocera Control Center (host app)"),
-    ("mouse_toggle", "Toggle mouse mode (pauses gamepad navigation)"),
+    ("control_center", "Control Center"),
+    ("screenshot", "Screenshot"),
+    ("mute_toggle", "Toggle mute"),
+    ("volume_up", "Volume up"),
+    ("volume_down", "Volume down"),
+    *[(key, label) for key, label, _name in ES_ONLY_ACTIONS],
+    ("mouse_toggle", "Toggle mouse mode"),
     ("mouse_left", "Left click"),
     ("mouse_right", "Right click"),
     ("mouse_middle", "Middle click"),
     ("mangohud_toggle", "Toggle MangoHud"),
-    ("keyboard_toggle", "Toggle on-screen keyboard"),
-    ("mute_toggle", "Toggle mute"),
-    ("brightness_min_toggle", "Toggle minimum brightness"),
+    ("keyboard_toggle", "On-screen keyboard"),
+    ("brightness_min_toggle", "Toggle min brightness"),
     ("led_toggle", "Toggle joystick LEDs"),
     ("wifi_toggle", "Toggle Wi-Fi"),
     ("bluetooth_toggle", "Toggle Bluetooth"),
-    ("fan_mode_cycle", "Cycle fan (silent/auto/aggressive/manual 50%/off)"),
-    ("power_profile_cycle", "Cycle power (profiles or CPU governor)"),
-    ("screenshot", "Screenshot"),
-    ("volume_up", "Volume up"),
-    ("volume_down", "Volume down"),
+    ("fan_mode_cycle", "Cycle fan mode"),
+    ("power_profile_cycle", "Cycle power profile"),
     ("key_f1", "F1 key"),
     ("key_f2", "F2 key"),
     ("key_f3", "F3 key"),
@@ -244,6 +254,15 @@ def resolve_action(action: str) -> dict:
         }
     if action == "none":
         return {"action": action, "available": True, "backend": "noop", "command": [], "reason": ""}
+
+    if action.startswith("es_"):
+        return {
+            "action": action,
+            "available": True,
+            "backend": "evmapy hotkeys.keys",
+            "command": ["hotkey", action],
+            "reason": "",
+        }
 
     if action == "control_center":
         ok = CONTROLCENTER.is_file()
@@ -481,13 +500,23 @@ def binding_health(bindings: dict) -> dict[str, dict]:
     return out
 
 
+def _choice_label(key: str, label: str) -> str:
+    if key == "none":
+        return label
+    if key.startswith("es_"):
+        return f"{label} · ES / emulators"
+    if key in _STEAM_ES_ACTIONS:
+        return f"{label} · Steam + ES"
+    return f"{label} · Steam / host"
+
+
 def action_choices(include: set[str] | None = None) -> list[dict[str, str]]:
     """Dropdown entries: always-available actions plus currently bound ones."""
     keep = set(include or ())
     choices = []
     for key, label in ACTIONS:
         if key == "none" or key in keep or action_available(key):
-            choices.append({"data": key, "label": label})
+            choices.append({"data": key, "label": _choice_label(key, label)})
     return choices
 
 
@@ -496,6 +525,9 @@ def run_action(action: str) -> None:
     if not action or action == "none":
         return
     if action not in {key for key, _label in ACTIONS}:
+        return
+
+    if action.startswith("es_"):
         return
 
     if action == "control_center":

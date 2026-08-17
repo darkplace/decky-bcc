@@ -1,21 +1,23 @@
 {
   "name": "Batocera Control",
-  "version": "0.2.12",
+  "version": "0.2.22",
   "maintainer": "suckbluefrog <suckbluefrog@proton.me>",
   "upstream": {
     "repository": "https://github.com/virtudude/armada",
     "commit": "3bcfd7cce1bb9ffeca82963451d6d1325b63c10d"
   },
   "batoceraIntegration": {
-    "repository": "https://github.com/darkplace/batocera-odin3-patches",
-    "commit": "d066186",
-    "releaseSha256": "3093befd7575ba19295fe9923e463555457ca80c413240c0506db8fb82da57a6"
+    "repository": "https://github.com/darkplace/batocera.pocket"
+  },
+  "fanCurveEditor": {
+    "repository": "https://github.com/armada-os/armada/pull/260",
+    "author": "Xtreme976"
   },
   "lsfgUiReference": {
     "repository": "https://github.com/xXJSONDeruloXx/decky-lsfg-vk",
     "commit": "6aa69db7a6895c89ffa99498beb017ad12d1b9ce"
   },
-  "audited": "2026-07-28",
+  "audited": "2026-08-17",
   "testedOn": [
     "Batocera Odin 3 / SM8750",
     "Batocera AYN Thor / SM8550",

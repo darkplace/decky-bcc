@@ -6,12 +6,14 @@ import { useDebouncedSave } from "./hooks/useDebouncedSave";
 import { tabIcons } from "./icons";
 import { currentGame } from "./lib/games";
 import { styles } from "./styles";
+import { setUiCompact } from "./lib/uiMode";
 import { BackPaddles } from "./tabs/BackPaddles";
 import { Compatibility } from "./tabs/Compatibility";
 import { LedControl } from "./tabs/LedControl";
 import { Lsfg } from "./tabs/Lsfg";
 import { OledCare } from "./tabs/OledCare";
 import { Power } from "./tabs/Power";
+import { Fans } from "./tabs/Fans";
 import { Settings } from "./tabs/Settings";
 import type { Config } from "./types";
 
@@ -27,6 +29,7 @@ export function Content() {
       const next = await getConfig();
       next.game = currentGame();
       next.selectedGame = next.game || null;
+      setUiCompact(next.tweaks?.global?.uiCompact !== false);
       savedPowerSnapshot.current = JSON.stringify(next.power);
       savedTweaksSnapshot.current = JSON.stringify(next.tweaks);
       setConfig((current) => ({ ...next, installedGames: current?.installedGames || next.installedGames }));
@@ -95,6 +98,7 @@ export function Content() {
           { id: "Compatibility", title: tabIcons.Compatibility, content: tabContent(<Compatibility config={config} setConfig={setConfig} />) },
           { id: "LSFG", title: tabIcons.LSFG, content: tabContent(<Lsfg config={config} setConfig={setConfig} />) },
           { id: "Power", title: tabIcons.Power, content: tabContent(<Power config={config} setConfig={setConfig} />) },
+          { id: "Fans", title: tabIcons.Fans, content: tabContent(<Fans setConfig={setConfig} />) },
           { id: "LEDs", title: tabIcons.LEDs, content: tabContent(<LedControl config={config} setConfig={setConfig} />) },
           { id: "OLED", title: tabIcons.OLED, content: tabContent(<OledCare config={config} setConfig={setConfig} />) },
           { id: "Paddles", title: tabIcons.Paddles, content: tabContent(<BackPaddles config={config} setConfig={setConfig} />) },

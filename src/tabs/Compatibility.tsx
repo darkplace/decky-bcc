@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { toaster } from "@decky/api";
 import { reapplyPerf, saveCompatApplied } from "../backend";
-import { SelectEdit, SliderEdit } from "../components/widgets";
+import { Hint, SelectEdit, SliderEdit } from "../components/widgets";
 import { getGlobalResolution, setGlobalResolution } from "../lib/steamSettings";
 import { clone } from "../lib/util";
 import { availableGames, editTargetOptions } from "../lib/games";
@@ -476,7 +476,7 @@ export function Compatibility({ config, setConfig }: { config: Config; setConfig
       <ButtonItem layout="below" onClick={() => openEnvVar(null)}>
         + Add Variable
       </ButtonItem>
-      <Field label="Applies on next launch" description="Variables are injected by batocera-control-game-launch before the game starts." />
+      <Hint label="Applies on next launch" description="Variables are injected by batocera-control-game-launch before the game starts." />
     </>
   );
 
@@ -547,9 +547,9 @@ export function Compatibility({ config, setConfig }: { config: Config; setConfig
           }}
         />
       ) : null}
-      <Field
+      <Hint
         label="Applies on next launch"
-        description="batocera-control-game-launch sets nice/affinity fail-open before exec. Re-apply can update a live SteamLaunch tree."
+        description="Sets nice/affinity before exec. Re-apply can update a live SteamLaunch tree."
       />
       <ButtonItem layout="below" disabled={reapplying} onClick={() => { void onReapply(); }}>
         {reapplying ? "Re-applying..." : "Re-apply to running game"}

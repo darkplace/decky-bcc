@@ -242,8 +242,13 @@ def resolve_qcom_mode(data: dict, curve_name: str) -> str | None:
     return FAN_CURVE_TO_QCOM.get(curve_name)
 
 
-def apply_active_profile(data=None) -> dict:
-    """Apply default profile using odin-power reload or stock governor+fan."""
+def apply_active_profile(data=None, apply_fan=True) -> dict:
+    """Apply default profile using odin-power reload or stock governor+fan.
+
+    apply_fan=False keeps Control Center's fan.state (Home+A) as the runtime
+    source of truth — used at boot so a persisted Silent/Aggressive/Off is
+    not overwritten by the power profile's mapped qcom-fan mode.
+    """
     payload = data if data is not None else parse_power()
     name = payload["general"]["default_profile"]
     if name not in PROFILES:
@@ -264,13 +269,14 @@ def apply_active_profile(data=None) -> dict:
         set_cpu_governor(gov)
         applied["governor"] = gov
 
-    mode = resolve_qcom_mode(payload, str(profile.get("fan_curve") or ""))
-    if mode and QCOM_FAN.is_file():
-        if mode in ("off", "stop"):
-            run_cmd([str(QCOM_FAN), "stop"], timeout=10)
-        else:
-            run_cmd([str(QCOM_FAN), mode], timeout=10)
-        applied["fan"] = mode
+    if apply_fan:
+        mode = resolve_qcom_mode(payload, str(profile.get("fan_curve") or ""))
+        if mode and QCOM_FAN.is_file():
+            if mode in ("off", "stop"):
+                run_cmd([str(QCOM_FAN), "stop"], timeout=10)
+            else:
+                run_cmd([str(QCOM_FAN), mode], timeout=10)
+            applied["fan"] = mode
     return applied
 
 
@@ -278,7 +284,8 @@ def apply_boot_defaults() -> None:
     """Best-effort boot apply for stock/odin power (never raises)."""
     try:
         if supported():
-            apply_active_profile()
+            # Governor only. Fan runtime belongs to Control Center / qcom-fan boot.
+            apply_active_profile(apply_fan=False)
     except Exception:
         pass
 

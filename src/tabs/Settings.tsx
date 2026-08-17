@@ -2,12 +2,14 @@ import { toaster } from "@decky/api";
 import { ButtonItem, Field, PanelSection } from "@decky/ui";
 import type { Dispatch, SetStateAction } from "react";
 import {
+  saveTweaks,
   setControllerType as applyControllerType,
   setSleepMode as applySleepMode,
   setSshEnabled as applySshEnabled,
 } from "../backend";
 import { openCalibration } from "../components/Calibration";
 import { SelectEdit, ToggleRow } from "../components/widgets";
+import { setUiCompact, useUiCompact } from "../lib/uiMode";
 import type { Config } from "../types";
 
 export function Settings({ config, setConfig }: {
@@ -47,9 +49,25 @@ export function Settings({ config, setConfig }: {
       toaster.toast({ title: "Could not change sleep mode", body: String(error) });
     }
   };
+  const compact = useUiCompact();
+  const setCompactLayout = (serious: boolean) => {
+    setUiCompact(serious);
+    const global = { ...(config.tweaks?.global || {}), uiCompact: serious };
+    const tweaks = { global, games: config.tweaks?.games || {} };
+    setConfig((current) => (current ? { ...current, tweaks } : current));
+    saveTweaks(tweaks).catch(() => {});
+  };
   const sleepModes = config.sleepModes || [];
   return (
     <>
+      <PanelSection title="Interface">
+        <ToggleRow
+          label="Serious layout"
+          description="Compact menu with helper descriptions hidden. Turn off to show detailed guidance."
+          value={compact}
+          onChange={setCompactLayout}
+        />
+      </PanelSection>
       <PanelSection title="Controller">
         {config.controllerSupported ? (
           <SelectEdit

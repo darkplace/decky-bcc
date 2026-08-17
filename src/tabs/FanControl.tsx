@@ -2,7 +2,7 @@ import { Field, PanelSection } from "@decky/ui";
 import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { getFanControl, saveFanControl } from "../backend";
-import { SelectEdit, SliderEdit } from "../components/widgets";
+import { Hint, SelectEdit, SliderEdit } from "../components/widgets";
 import type { Config, FanControlConfig } from "../types";
 
 const FALLBACK_MODES = [
@@ -93,9 +93,9 @@ export function FanControl({ config, setConfig }: {
 
   return (
     <PanelSection title="Fan control">
-      <Field
+      <Hint
         label="Batocera qcom-fan"
-        description="Same curves as Batocera Control Center / CLI: silent, balanced, aggressive, manual, or off."
+        description="Same picker as Control Center (Home+A). Curve points are edited in the Fans tab."
       />
       <SelectEdit
         label="Mode"
@@ -115,9 +115,9 @@ export function FanControl({ config, setConfig }: {
             format={(value) => `${Math.round(value)}%`}
             onChange={(targetPercent) => apply({ mode: "manual", targetPercent: Math.round(targetPercent) }, 200)}
           />
-          <Field
+          <Hint
             label="Manual override active"
-            description="Temperature curves are disabled until Silent, Balanced, or Aggressive is selected again."
+            description="Temperature curves resume when Silent, Balanced, or Aggressive is selected."
           />
         </>
       ) : null}

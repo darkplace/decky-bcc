@@ -1,6 +1,6 @@
 {
   "name": "armada-control",
-  "version": "0.2.18",
+  "version": "0.2.22",
   "description": "Batocera-native Decky controls for ARM and x86 handhelds",
   "author": "suckbluefrog <suckbluefrog@proton.me>",
   "license": "GPL-2.0-or-later",

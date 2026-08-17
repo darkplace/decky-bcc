@@ -2,7 +2,7 @@ import { Field, PanelSection } from "@decky/ui";
 import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { getCpuLimit, saveCpuLimit } from "../backend";
-import { SelectEdit } from "../components/widgets";
+import { Hint, SelectEdit } from "../components/widgets";
 import type { Config, CpuLimitConfig } from "../types";
 
 const MODE_LABELS: Record<string, string> = {
@@ -104,14 +104,14 @@ export function AdaptiveCpu({ config, setConfig }: {
   return (
     <PanelSection title={state.kind === "tdp" ? "Adaptive TDP" : "Adaptive CPU"}>
       {state.kind === "tdp" ? (
-        <Field
+        <Hint
           label="Batocera package-power limiter"
-          description="Adaptive TDP lowers package power in one-watt steps while frame rate has headroom and raises it when FPS falls. Your existing TDP setting remains the ceiling; this control does not replace or override the normal TDP slider."
+          description="Adaptive TDP trims package power while FPS has headroom. Your TDP setting stays the ceiling."
         />
       ) : (
-        <Field
+        <Hint
           label="Batocera CPU limiter"
-          description="Thermal guard reacts to temperature and fan load. Adaptive FPS also reduces the CPU ceiling while frame rate has headroom, then releases it when FPS falls. It never overclocks."
+          description="Thermal guard reacts to temperature and fan load. Adaptive FPS trims the CPU ceiling with headroom. Never overclocks."
         />
       )}
       <SelectEdit label="Mode" value={state.mode} options={modeOptions} onChange={(mode) => apply({ mode })} />
@@ -120,15 +120,16 @@ export function AdaptiveCpu({ config, setConfig }: {
       ) : null}
       <SelectEdit
         label="Target frame rate"
+        labelBelow
         value={state.globalTargetFps}
         options={targetOptions}
         disabled={state.mode !== "adaptive"}
         onChange={(globalTargetFps) => apply({ globalTargetFps })}
       />
       <Field label="Runtime" description={runtimeLabel(state)} />
-      <Field
+      <Hint
         label="FPS source"
-        description={`${state.dataSource}. Steam uses Gamescope statistics; ES-launched emulators use Batocera's hidden FPS sampler. This is independent of the visible MangoHud performance overlay.`}
+        description={`${state.dataSource}. Steam uses Gamescope stats; ES emulators use Batocera's FPS sampler.`}
       />
       {message ? <Field label="Last change" description={message} /> : null}
     </PanelSection>

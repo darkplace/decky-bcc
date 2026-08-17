@@ -2,7 +2,7 @@ import { Field, PanelSection } from "@decky/ui";
 import { useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { saveBackPaddles } from "../backend";
-import { SelectEdit } from "../components/widgets";
+import { Hint, SelectEdit } from "../components/widgets";
 import type { BackPaddleBindings, Config } from "../types";
 
 export function BackPaddles({ config, setConfig }: {
@@ -58,38 +58,38 @@ export function BackPaddles({ config, setConfig }: {
   return (
     <>
       <PanelSection title="Back paddles (M1 / M2)">
-        <Field
+        <Hint
           label={backend}
           description={[device || "AYN rear-paddle input", codeMap].filter(Boolean).join(" · ")}
-          children="Tap actions fire on release. Chords fire once while held. The listener observes without grabbing, so Steam, ES, and emulators still receive both paddles."
+          children="One system-wide bind. Steam/host actions fire on tap; ES/emulator actions use Home+paddle."
         />
-        {bp.source === "rsinput" ? (
-          <Field
-            label="Batocera hotkeys coexist"
-            description="Home/Hotkey + paddle is left to Batocera and suppresses the paddle tap action, preventing both mappings from firing together."
-          />
-        ) : null}
-        {activeHealth.length ? (
-          <Field label="Binding targets" description={activeHealth.join(" · ")} />
-        ) : null}
+        <Hint
+          label="Binding targets"
+          description={activeHealth.length ? activeHealth.join(" · ") : "None assigned"}
+        />
       </PanelSection>
       <PanelSection title="Bindings">
         {bp.warning ? <Field label="Warning" description={bp.warning} /> : null}
         {mouseModeAssigned ? (
           <Field
             label="Mouse mode pauses gamepad navigation"
-            description="Press the assigned paddle again to restore normal controls before changing or clearing its binding."
+            description="Press the assigned paddle again to restore controls before changing its binding."
           />
         ) : null}
-        {slots.map((slot) => (
-          <SelectEdit
-            key={slot.data}
-            label={slot.label}
-            value={bindings[slot.data as keyof BackPaddleBindings] || "none"}
-            options={actions}
-            onChange={(value) => update(slot.data as keyof BackPaddleBindings, value)}
-          />
-        ))}
+        {slots.map((slot) => {
+          const isTap = slot.data === "m1" || slot.data === "m2";
+          const options = isTap ? actions : actions.filter((choice) => !String(choice.data).startsWith("es_"));
+          return (
+            <SelectEdit
+              key={slot.data}
+              label={slot.label}
+              labelBelow
+              value={bindings[slot.data as keyof BackPaddleBindings] || "none"}
+              options={options}
+              onChange={(value) => update(slot.data as keyof BackPaddleBindings, value)}
+            />
+          );
+        })}
       </PanelSection>
     </>
   );

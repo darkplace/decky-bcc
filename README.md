@@ -118,11 +118,12 @@ while ES-launched emulators use the system's hidden FPS sampler. That sampler
 is independent of Steam's visible MangoHud performance overlay.
 
 On supported Qualcomm handhelds, the same tab exposes `qcom-fan` modes used by
-Batocera Control Center: **Silent**, **Balanced (auto)**, **Aggressive**,
-**Manual** (20–100%), and **Off**. Automatic/balanced follows the system
-temperature curve. Manual holds the selected percentage until a named curve or
-Off is chosen again, or until reboot. Unsupported or read-only fan
-implementations are not offered as writable controls.
+Control Center (**Home+A**): **Silent**, **Balanced (auto)**, **Aggressive**,
+**Manual** (20–100%), and **Off**. That picker only selects the runtime mode.
+Curve *points* are edited in the **Fans** tab (ported from Armada PR #260 by
+**Xtreme976**; see `CREDITS.md`) into `/userdata/system/configs/qcom-fan-curves.conf`. There is still
+a single `qcom-fan` daemon. Fan +/- in Control Center is a manual override;
+named curves resume when Silent / Auto / Aggressive is chosen again.
 
 The editable eco/balanced/performance power-profile block uses `odin-power`
 when that maintainer helper is present. On stock Qualcomm images it uses a
@@ -146,14 +147,14 @@ one `/sys/power/mem_sleep` option.
 
 ### OLED care and screensaver
 
-Automatic idle-dim (legacy `odin-oled-care` userdata service) is **deferred**
-until a stock-native implementation exists; the plugin does not enable or
-configure that host service in current releases.
+On a detected OLED panel, **OLED Screen Protection** runs the pixel refresher
+after an idle timeout inside Steam GamepadUI. Options sync through
+`display.oledcare*` in `batocera.conf` (same keys EmulationStation uses when
+the image ships `batocera-oled-care`).
 
-A detected Odin OLED panel still gets a manual mostly-black moving screensaver
-in Decky. It keeps Steam and downloads running, does not suspend or modify
-saved brightness, and exits on the first controller button, keyboard key, or
-touch input.
+A mostly-black moving screensaver remains available as a manual Steam helper.
+It keeps Steam and downloads running and exits on the first button, key, or
+touch.
 
 On x86 handhelds, the x64/Wine layer is sufficient. Compatibility-tool,
 resolution, LED, and LSFG controls remain available, while the ARM-only FEX
@@ -203,11 +204,19 @@ the Decky plugin but keeps settings and both fail-open game/LSFG launch helpers.
 This is deliberate: removing a helper still referenced by Steam launch options
 would make games fail to start.
 
+## Credits
+
+- **Xtreme976** — Fan curve editor (Fans tab), from
+  [armada-os/armada#260](https://github.com/armada-os/armada/pull/260), adapted
+  to Batocera `qcom-fan`. Details in `CREDITS.md`.
+- Armada Control: <https://github.com/virtudude/armada>
+- Decky LSFG-VK UI reference: <https://github.com/xXJSONDeruloXx/decky-lsfg-vk>
+- LSFG-VK system layer: <https://github.com/PancakeTAS/lsfg-vk>
+
 ## License and provenance
 
 GPL-2.0-or-later. See `LICENSE.md`, `THIRD_PARTY_NOTICES.md`, and `SOURCE.json`.
 
-- Armada upstream: <https://github.com/virtudude/armada>
-- Odin 3 Batocera integration: <https://github.com/darkplace/batocera-odin3-patches>
-- Decky LSFG-VK UI reference: <https://github.com/xXJSONDeruloXx/decky-lsfg-vk>
-- LSFG-VK system layer: <https://github.com/PancakeTAS/lsfg-vk>
+Batocera handheld images live in
+<https://github.com/darkplace/batocera.pocket> (this plugin is not a
+continuation of the retired `batocera-odin3-patches` / community-patches tree).

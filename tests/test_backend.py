@@ -14,7 +14,7 @@ from unittest import mock
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLUGIN_ROOT / "py_modules"))
 
-from armada_control import back_paddles, calibration, cpu_limit, emulation_broker as emulation, fan_control, joystick_led, lsfg, paddle_actions, paddle_daemon, power, runtime, steam, system  # noqa: E402
+from armada_control import back_paddles, calibration, cpu_limit, emulation_broker as emulation, es_paddle_hotkeys, fan_control, joystick_led, lsfg, paddle_actions, paddle_daemon, power, runtime, steam, system  # noqa: E402
 
 
 class JoystickLedTests(unittest.TestCase):
@@ -355,7 +355,7 @@ class BackPaddleTests(unittest.TestCase):
     def test_fresh_defaults_do_not_take_over_gamepad_navigation(self):
         self.assertEqual(set(paddle_actions.DEFAULT_BINDINGS.values()), {"none"})
         self.assertIn(
-            ("control_center", "Batocera Control Center (host app)"),
+            ("control_center", "Control Center"),
             paddle_actions.ACTIONS,
         )
 
@@ -479,6 +479,84 @@ class BackPaddleTests(unittest.TestCase):
         self.assertEqual(info["path"], "/dev/input/event11")
         self.assertEqual(info["m1Code"], 710)
         self.assertEqual(info["m2Code"], 708)
+
+
+class EsPaddleHotkeyTests(unittest.TestCase):
+    def test_seeds_empty_m1_from_es_paddle2_and_writes_physical_mapping(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            system_keys = root / "stock.keys"
+            user_keys = root / "user.keys"
+            system_keys.write_text(
+                json.dumps(
+                    {
+                        "actions_player1": [
+                            {
+                                "trigger": ["hotkey", "paddle2"],
+                                "type": "key",
+                                "target": ["KEY_SAVE"],
+                                "description": "Save state",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(es_paddle_hotkeys, "SYSTEM_HOTKEYS", system_keys),
+                mock.patch.object(es_paddle_hotkeys, "USER_HOTKEYS", user_keys),
+                mock.patch.object(es_paddle_hotkeys, "HOTKEY_MAP", root / "missing-map.conf"),
+            ):
+                seeded = es_paddle_hotkeys.merge_es_bindings({"m1": "none", "m2": "keyboard_toggle"})
+                self.assertEqual(seeded["m1"], "es_save_state")
+                self.assertEqual(seeded["m2"], "keyboard_toggle")
+
+                es_paddle_hotkeys.write_es_paddle_actions(
+                    {"m1": "es_save_state", "m2": "screenshot"}
+                )
+                written = json.loads(user_keys.read_text(encoding="utf-8"))
+                paddles = {
+                    entry["trigger"][1]: entry["target"][0]
+                    for entry in written["actions_player1"]
+                    if isinstance(entry.get("trigger"), list) and entry["trigger"][0] == "hotkey"
+                    and entry["trigger"][1] in ("paddle1", "paddle2")
+                }
+                self.assertEqual(paddles["paddle2"], "KEY_SAVE")
+                self.assertEqual(paddles["paddle1"], "KEY_SYSRQ")
+
+    def test_host_only_action_clears_es_paddle(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            user_keys = root / "user.keys"
+            user_keys.write_text(
+                json.dumps(
+                    {
+                        "actions_player1": [
+                            {
+                                "trigger": ["hotkey", "paddle1"],
+                                "type": "key",
+                                "target": ["KEY_SYSRQ"],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(es_paddle_hotkeys, "SYSTEM_HOTKEYS", root / "missing.keys"),
+                mock.patch.object(es_paddle_hotkeys, "USER_HOTKEYS", user_keys),
+                mock.patch.object(es_paddle_hotkeys, "HOTKEY_MAP", root / "missing-map.conf"),
+            ):
+                es_paddle_hotkeys.write_es_paddle_actions({"m1": "none", "m2": "mouse_toggle"})
+                written = json.loads(user_keys.read_text(encoding="utf-8"))
+                paddles = [
+                    entry["trigger"][1]
+                    for entry in written["actions_player1"]
+                    if isinstance(entry.get("trigger"), list) and len(entry["trigger"]) == 2
+                    and entry["trigger"][0] == "hotkey"
+                    and entry["trigger"][1] in ("paddle1", "paddle2")
+                ]
+                self.assertEqual(paddles, [])
 
 
 class PaddleInterpreterTests(unittest.TestCase):
@@ -817,6 +895,30 @@ class PowerDetectionTests(unittest.TestCase):
                 self.assertEqual(power.backend(), "stock")
                 self.assertTrue(power.supported())
                 self.assertEqual(power.unsupported_reason(), "")
+
+    def test_boot_defaults_do_not_overwrite_control_center_fan_state(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            qcom = root / "qcom-fan"
+            qcom.write_text("#!/bin/sh\n", encoding="utf-8")
+            qcom.chmod(0o755)
+            factory = PLUGIN_ROOT / "py_modules" / "power-profiles.factory.conf"
+            commands = []
+            with (
+                mock.patch.object(power, "POWER_SCRIPT", root / "missing-odin-power"),
+                mock.patch.object(power, "QCOM_FAN", qcom),
+                mock.patch.object(power, "FACTORY_POWER_CONFIG", root / "missing-usr"),
+                mock.patch.object(power, "BUNDLED_POWER_CONFIG", root / "bundled.conf"),
+                mock.patch.object(power, "PLUGIN_FACTORY", factory),
+                mock.patch.object(power, "AMD_TDP", root / "missing-amd"),
+                mock.patch.object(power, "DEVICE_TREE_COMPAT", root / "compatible"),
+                mock.patch.object(power, "cpu_governors", return_value=["ondemand", "performance"]),
+                mock.patch.object(power, "set_cpu_governor", lambda _gov: None),
+                mock.patch.object(power, "run_cmd", side_effect=lambda cmd, timeout=10: commands.append(list(cmd))),
+            ):
+                (root / "compatible").touch()
+                power.apply_boot_defaults()
+            self.assertFalse(any(cmd and str(cmd[0]).endswith("qcom-fan") for cmd in commands))
 
 
 class PerfHelperTests(unittest.TestCase):

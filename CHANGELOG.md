@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.22 - 2026-08-17
+
+- Credit **Xtreme976** for the Fan curve editor
+  ([armada-os/armada#260](https://github.com/armada-os/armada/pull/260)).
+- Fans tab: port of that editor onto `qcom-fan` named curves (Silent / Auto /
+  Aggressive). It does not replace Control Center Fan Mode (Home+A).
+- Point provenance at `batocera.pocket` instead of the retired
+  `batocera-odin3-patches` tree.
+- Compact "Serious layout" (revertible in Advanced → Interface).
+- Smaller tab icons and a right-edge fade so extra tabs are discoverable.
+- Drop inert OLED Pixel shifter / Ultra Black from the QAM.
+- System-wide M1/M2 paddle binds shared with EmulationStation `hotkeys.keys`.
+- OLED pixel refresher in Steam after idle timeout.
+
 ## 0.2.18 - 2026-08-15
 
 - Compatibility Performance Re-apply: match Non-Steam shortcuts by both signed

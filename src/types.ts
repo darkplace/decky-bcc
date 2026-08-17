@@ -66,6 +66,31 @@ export interface FanControlConfig {
   targetPercent: number;
 }
 
+export interface ProfileSummary {
+  label: string;
+  fan_curve: string;
+}
+
+export interface FanSettings {
+  ramp_up: number;
+  ramp_down: number;
+  smoothing: number;
+  min_pwm: number;
+}
+
+export interface CurvesState {
+  fanCurves: Record<string, FanCurve>;
+  factoryFanCurves: Record<string, FanCurve>;
+  fanSettings: FanSettings;
+  factoryFanSettings: FanSettings;
+  profiles: Record<string, ProfileSummary>;
+  activeProfile: string;
+  runtimeMode?: string;
+  currentTemp: number | null;
+  supported?: boolean;
+  reason?: string;
+}
+
 export interface GameTweak {
   enabled?: boolean;
   name?: string;
@@ -179,21 +204,30 @@ export interface JoystickLedState {
 
 export interface OledCareConfig {
   ENABLED: number;
-  BRIGHTNESS_NORMAL: number;
-  BRIGHTNESS_IDLE: number;
-  IDLE_DIM_SECONDS: number;
+  DETECT: number;
+  STATIC_TIMEOUT: number;
+  REFRESHER: number;
+  REFRESHER_DURATION: number;
+  REFRESHER_PASSES: number;
+  SHIFTER: number;
+  SHIFTER_RADIUS: number;
+  SHIFTER_DURATION: number;
+  MURA: number;
 }
 
 export interface OledCareRuntime {
   serviceRunning: boolean;
   monitorRunning: boolean;
   idleSeconds: number;
+  phase?: string;
   brightnessPct: number | null;
 }
 
 export interface OledCareState {
   supported: boolean;
   panelDetected: boolean;
+  stockCli?: boolean;
+  muraAvailable?: boolean;
   reason?: string;
   config: OledCareConfig;
   labels: Record<string, string>;

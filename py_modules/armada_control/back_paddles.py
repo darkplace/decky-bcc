@@ -8,6 +8,7 @@ import re
 import threading
 from pathlib import Path
 
+from .es_paddle_hotkeys import merge_es_bindings, write_es_paddle_actions
 from .paddle_actions import ACTIONS, DEFAULT_BINDINGS, action_choices, binding_health
 from .system import atomically_write, run_cmd
 
@@ -121,13 +122,13 @@ def _migrate_unversioned_defaults(payload: object, bindings: dict) -> dict:
 
 def load_bindings() -> dict:
     if not CONFIG_PATH.exists():
-        return dict(DEFAULT_BINDINGS)
+        return merge_es_bindings(dict(DEFAULT_BINDINGS))
     try:
         payload = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return dict(DEFAULT_BINDINGS)
+        return merge_es_bindings(dict(DEFAULT_BINDINGS))
     bindings = _normalize(_extract_bindings(payload))
-    return _migrate_unversioned_defaults(payload, bindings)
+    return merge_es_bindings(_migrate_unversioned_defaults(payload, bindings))
 
 
 def _event_sort_key(path: Path) -> tuple[int, str]:
@@ -292,6 +293,7 @@ def get_state() -> dict:
             warning = "Bindings file is malformed; defaults are shown"
     else:
         bindings = dict(DEFAULT_BINDINGS)
+    bindings = merge_es_bindings(bindings)
 
     backend = _detect_backend()
     reason = str(backend.get("reason") or "")
@@ -331,6 +333,10 @@ def save_state(data: dict) -> dict:
             json.dumps({"version": CONFIG_VERSION, "bindings": bindings}, indent=2, sort_keys=True) + "\n",
             0o644,
         )
+        try:
+            write_es_paddle_actions(bindings)
+        except (OSError, TypeError, ValueError):
+            pass
         _restart_daemon(backend)
     return get_state()
 

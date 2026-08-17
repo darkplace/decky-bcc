@@ -17,11 +17,14 @@ from armada_control.emulation import managed_appids as emulation_managed_appids
 from armada_control.emulation import set_game_setting as set_emulation_game_setting
 from armada_control.fan_control import get_state as fan_control_state
 from armada_control.fan_control import save_state as save_fan_control
+from armada_control.fan_curves import get_current_temp
+from armada_control.fan_curves import get_state as get_fans_state
+from armada_control.fan_curves import save_all as save_fan_curves
 from armada_control.joystick_led import save_state as save_joystick_led
 from armada_control.lsfg import save_state as save_lsfg
 from armada_control.lsfg import set_game_enabled as set_lsfg_game_enabled
-from armada_control.oled_care import get_state as oled_care_state
 from armada_control.oled_care import restart_service as restart_oled_care
+from armada_control.oled_care import run_refresh_now as run_oled_refresh
 from armada_control.oled_care import save_state as save_oled_care
 from armada_control.power import save_power_config
 from armada_control.steam import installed_games
@@ -55,6 +58,15 @@ class Plugin:
 
     async def save_fan_control(self, data):
         return await asyncio.to_thread(save_fan_control, data)
+
+    async def get_fans_state(self):
+        return await asyncio.to_thread(get_fans_state)
+
+    async def save_fan_curves(self, fan_curves, fan_settings):
+        return await asyncio.to_thread(save_fan_curves, fan_curves, fan_settings)
+
+    async def get_current_temp(self):
+        return await asyncio.to_thread(get_current_temp)
 
     async def save_tweaks(self, data):
         await asyncio.to_thread(save_tweaks, data)
@@ -108,8 +120,21 @@ class Plugin:
     async def restart_oled_care(self):
         return await asyncio.to_thread(restart_oled_care)
 
-    async def get_oled_care(self):
-        return await asyncio.to_thread(oled_care_state)
+    async def get_oled_idle(self):
+        from armada_control.oled_care import idle_snapshot
+        return await asyncio.to_thread(idle_snapshot)
+
+    async def note_oled_activity(self):
+        from armada_control.oled_care import note_activity
+        await asyncio.to_thread(note_activity)
+        return True
+
+    async def _unload(self):
+        from armada_control.oled_care import stop_idle_watch
+        await asyncio.to_thread(stop_idle_watch)
+
+    async def run_oled_refresh(self):
+        return await asyncio.to_thread(run_oled_refresh)
 
     async def save_back_paddles(self, data):
         return await asyncio.to_thread(save_back_paddles, data)

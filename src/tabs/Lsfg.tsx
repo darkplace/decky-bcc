@@ -2,7 +2,7 @@ import { Field, PanelSection } from "@decky/ui";
 import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { saveLsfg, setLsfgGameEnabled } from "../backend";
-import { SelectEdit, ToggleRow } from "../components/widgets";
+import { Hint, SelectEdit, ToggleRow } from "../components/widgets";
 import { setLsfgLaunchOption } from "../lib/steamCompat";
 import type { Config, LsfgConfig } from "../types";
 
@@ -120,7 +120,7 @@ export function Lsfg({ config, setConfig }: {
         />
         <ToggleRow
           label="Enable for all Steam games"
-          description="Global mode injects the layer into every Steam Vulkan/DXVK game after Steam is restarted. Leave this off to use the per-game selector below."
+          description="Injects the layer into every Steam game after a restart. Off = use the per-game selector."
           value={settings.enabled}
           disabled={!state.ready}
           onChange={(enabled) => apply({ enabled })}
@@ -155,35 +155,35 @@ export function Lsfg({ config, setConfig }: {
       </PanelSection>
 
       <PanelSection title="Frame generation">
-        <Field label="Frame multiplier" description="2x has the lowest GPU cost; 3x/4x synthesize more frames and require more headroom." />
+        <Hint label="Frame multiplier" description="2x has the lowest GPU cost; 3x/4x need more headroom." />
         <SelectEdit label="Multiplier" value={settings.multiplier} options={MULTIPLIERS} onChange={(multiplier) => apply({ multiplier })} />
-        <Field label="Optical-flow resolution" description="Lower values reduce motion-estimation cost at the expense of generated-frame detail." />
+        <Hint label="Optical-flow resolution" description="Lower values cost less at the expense of generated-frame detail." />
         <SelectEdit label="Flow scale" value={settings.flowScale} options={FLOW_SCALES} onChange={(flowScale) => apply({ flowScale })} />
         <ToggleRow
           label="Performance mode"
-          description="Uses the lighter LSFG model. Recommended on SM8550/SM8750 when games are GPU-bound."
+          description="Lighter LSFG model. Recommended when GPU-bound."
           value={settings.performanceMode}
           onChange={(performanceMode) => apply({ performanceMode })}
         />
         <ToggleRow
           label="HDR mode"
-          description="Enable only when both the game and display session are using HDR."
+          description="Only when both game and display use HDR."
           value={settings.hdrMode}
           onChange={(hdrMode) => apply({ hdrMode })}
         />
-        <Field label="Present mode" description="Automatic is safest. FIFO favors tear-free output; Mailbox/Immediate may reduce latency but can stutter or tear." />
+        <Hint label="Present mode" description="Automatic is safest. FIFO is tear-free; Mailbox/Immediate can reduce latency but may tear." />
         <SelectEdit label="Vulkan present mode" value={settings.presentMode} options={PRESENT_MODES} onChange={(presentMode) => apply({ presentMode })} />
       </PanelSection>
 
       <PanelSection title="Activation">
-        <Field label="Status" description={message || "Per-game activation applies on the next game launch. Only global all-games mode requires a Steam/GamepadUI restart."} />
+        <Field label="Status" description={message || "Per-game applies on next launch; all-games mode needs a Steam restart."} />
         {state.legacyPluginDetected || state.legacyConfigDetected || state.legacyLaunchScriptDetected ? (
           <Field
             label="Legacy LSFG setup detected"
-            description="The old Decky plugin/wrapper is retained for rollback. Remove ~/lsfg from per-game Steam launch options before enabling Batocera's global layer to avoid double injection."
+            description="Old wrapper kept for rollback. Remove ~/lsfg from per-game launch options before enabling the global layer."
           />
         ) : null}
-        <Field label="Upstream" description="System layer: PancakeTAS/lsfg-vk. UI integration derived from Decky LSFG-VK concepts." />
+        <Hint label="Upstream" description="System layer: PancakeTAS/lsfg-vk. UI derived from Decky LSFG-VK." />
       </PanelSection>
     </>
   );

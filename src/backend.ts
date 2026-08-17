@@ -1,5 +1,5 @@
 import { call } from "@decky/api";
-import type { BackPaddleBindings, BackPaddleState, CalibrationState, Capture, Config, CpuLimitConfig, CpuLimitState, EmulationState, FanControlConfig, FanControlState, InstalledGame, JoystickLedConfig, JoystickLedState, LsfgConfig, LsfgState, OledCareConfig, OledCareState, PowerConfig, Tweaks } from "./types";
+import type { BackPaddleBindings, BackPaddleState, CalibrationState, Capture, Config, CpuLimitConfig, CpuLimitState, CurvesState, EmulationState, FanControlConfig, FanControlState, FanCurve, FanSettings, InstalledGame, JoystickLedConfig, JoystickLedState, LsfgConfig, LsfgState, OledCareConfig, OledCareState, PowerConfig, Tweaks } from "./types";
 
 export const getConfig = () => call<[], Config>("get_config");
 export const getInstalledGames = () => call<[], InstalledGame[]>("get_installed_games");
@@ -8,6 +8,10 @@ export const getCpuLimit = () => call<[], CpuLimitState>("get_cpu_limit");
 export const saveCpuLimit = (data: CpuLimitConfig) => call<[CpuLimitConfig], CpuLimitState>("save_cpu_limit", data);
 export const getFanControl = () => call<[], FanControlState>("get_fan_control");
 export const saveFanControl = (data: FanControlConfig) => call<[FanControlConfig], FanControlState>("save_fan_control", data);
+export const getFansState = () => call<[], CurvesState>("get_fans_state");
+export const saveFanCurves = (fanCurves: Record<string, FanCurve>, fanSettings: FanSettings) =>
+  call<[Record<string, FanCurve>, FanSettings], CurvesState>("save_fan_curves", fanCurves, fanSettings);
+export const getCurrentTemp = () => call<[], number | null>("get_current_temp");
 export const saveTweaks = (data: Tweaks) => call<[Tweaks], Config>("save_tweaks", data);
 export const getCompatApplied = () => call<[], string[]>("get_compat_applied");
 let compatAppliedSaveChain = Promise.resolve<unknown>(undefined);
@@ -36,6 +40,18 @@ export const endCalibrationSession = (token: string) => call<[string], boolean>(
 export const saveJoystickLed = (data: JoystickLedConfig) => call<[JoystickLedConfig], JoystickLedState>("save_joystick_led", data);
 export const saveOledCare = (data: OledCareConfig) => call<[OledCareConfig], OledCareState>("save_oled_care", data);
 export const restartOledCare = () => call<[], OledCareState>("restart_oled_care");
+export const noteOledActivity = () => call<[], boolean>("note_oled_activity");
+export const getOledIdle = () =>
+  call<[], {
+    idleSeconds: number;
+    watching: boolean;
+    enabled?: boolean;
+    refresher?: boolean;
+    timeout?: number;
+    duration?: number;
+    passes?: number;
+  }>("get_oled_idle");
+export const runOledRefresh = () => call<[], OledCareState>("run_oled_refresh");
 export const saveBackPaddles = (data: BackPaddleBindings) => call<[BackPaddleBindings], BackPaddleState>("save_back_paddles", data);
 export const saveLsfg = (data: LsfgConfig) => call<[LsfgConfig], LsfgState>("save_lsfg", data);
 export const setLsfgGameEnabled = (appid: string, enabled: boolean) => call<[string, boolean], LsfgState>("set_lsfg_game_enabled", appid, enabled);
