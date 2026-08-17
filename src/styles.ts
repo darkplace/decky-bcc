@@ -15,7 +15,6 @@ export const styles = `
         box-shadow: none;
         backdrop-filter: none;
       }
-      /* Trial: hint that the icon tab row scrolls. Revert this block + 16px icons if it feels worse. */
       .armada-control-tabs > div > div:first-child::after {
         content: "";
         position: absolute;
@@ -26,15 +25,6 @@ export const styles = `
         pointer-events: none;
         z-index: 2;
         background: linear-gradient(to right, rgba(13, 20, 28, 0), #0D141C 88%);
-      }
-      .armada-control-tabs [role="tab"] {
-        min-width: 0 !important;
-        padding-left: 10px !important;
-        padding-right: 10px !important;
-      }
-      .armada-control-tabs [role="tab"] svg {
-        width: 16px;
-        height: 16px;
       }
       .armada-control-tabs [role="tabpanel"] {
         padding-left: 0 !important;

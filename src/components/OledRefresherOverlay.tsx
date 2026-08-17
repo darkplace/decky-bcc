@@ -1,10 +1,20 @@
-import { ModalRoot, Navigation, findSP, showModal } from "@decky/ui";
-import { useEffect, useRef } from "react";
+import { Navigation } from "@decky/ui";
 import { getOledRefresherOpts, setOledRefresherActive } from "../lib/oledRefresher";
+import { steamClient, steamNavManager, steamWindow } from "../lib/steamHost";
+import { applyCoverChrome, pushOverlayComposition, releaseCoverChrome } from "../lib/uiComposition";
 
 const AYN_TEXT = "Anti-image-retention pixel refresh in progress, tap to exit (%ds)";
-/** Batocera/AYN: each noise grain is a 3×3 framebuffer pixel cell. */
 const CELL_PX = 3;
+const ARM_MS = 450;
+const SHIELD_MS = 480;
+
+let mounted: {
+  root: HTMLDivElement;
+  win: Window;
+  doc: Document;
+  stop: () => void;
+  releaseComposition: () => void;
+} | null = null;
 
 function controllerButtonsPressed(changes: any[]) {
   return Array.isArray(changes) && changes.some((change) => {
@@ -17,16 +27,50 @@ function controllerButtonsPressed(changes: any[]) {
   });
 }
 
-function fillNoise(ctx: CanvasRenderingContext2D, cols: number, rows: number) {
-  const image = ctx.createImageData(cols, rows);
-  const data = image.data;
-  for (let i = 0; i < data.length; i += 4) {
-    data[i] = (Math.random() * 256) | 0;
-    data[i + 1] = (Math.random() * 256) | 0;
-    data[i + 2] = (Math.random() * 256) | 0;
-    data[i + 3] = 255;
+function disableSmoothing(ctx: CanvasRenderingContext2D) {
+  ctx.imageSmoothingEnabled = false;
+  (ctx as CanvasRenderingContext2D & { webkitImageSmoothingEnabled?: boolean }).webkitImageSmoothingEnabled = false;
+}
+
+/** Same recipe as the pygame smoke: fill 3×3 rects, then blit 1:1. */
+function paintBand(ctx: CanvasRenderingContext2D, width: number, height: number, cell: number) {
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, width, height);
+  const inset = 16;
+  const innerW = width - inset * 2;
+  const innerH = height - inset * 2;
+  if (innerW < cell || innerH < cell) return;
+  const cols = Math.floor(innerW / cell);
+  const rows = Math.floor(innerH / cell);
+  for (let row = 0; row < rows; row++) {
+    const y = inset + row * cell;
+    for (let col = 0; col < cols; col++) {
+      const x = inset + col * cell;
+      ctx.fillStyle = `rgb(${(Math.random() * 256) | 0},${(Math.random() * 256) | 0},${(Math.random() * 256) | 0})`;
+      ctx.fillRect(x, y, cell, cell);
+    }
   }
-  ctx.putImageData(image, 0, 0);
+}
+
+function eat(event: Event) {
+  event.preventDefault();
+  event.stopPropagation();
+  (event as { stopImmediatePropagation?: () => void }).stopImmediatePropagation?.();
+}
+
+function unmount(immediate = false) {
+  const current = mounted;
+  if (!current) return;
+  current.stop();
+  const finish = () => {
+    if (mounted?.root !== current.root) return;
+    current.releaseComposition();
+    current.root.remove();
+    releaseCoverChrome(current.doc);
+    mounted = null;
+  };
+  if (immediate) finish();
+  else current.win.setTimeout(finish, SHIELD_MS);
 }
 
 export function openOledRefresher(opts?: { durationSec?: number; passes?: number }) {
@@ -36,82 +80,78 @@ export function openOledRefresher(opts?: { durationSec?: number; passes?: number
   } catch {
     /* ignore */
   }
-  window.setTimeout(() => {
-    showModal(<OledRefresherModal />, findSP() || window, { bHideActionIcons: true });
-  }, 80);
+  window.setTimeout(() => mountOledRefresher(), 80);
 }
 
-export function OledRefresherModal({ closeModal }: { closeModal?: () => void }) {
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const labelRef = useRef<HTMLDivElement>(null);
-  const armed = useRef(false);
+function mountOledRefresher() {
+  if (mounted) unmount(true);
+  const win = steamWindow();
+  const doc = win.document;
+  const root = doc.createElement("div");
+  root.id = "batocera-oled-refresh-root";
+  root.setAttribute("aria-label", AYN_TEXT.replace("%ds", ""));
+  const canvas = doc.createElement("canvas");
+  const label = doc.createElement("div");
+  label.style.cssText = "position:absolute;left:4%;right:4%;top:6%;text-align:center;color:#fff;font-size:22px;font-weight:600;line-height:1.35;user-select:none;pointer-events:none;z-index:1;";
+  root.append(canvas, label);
+  applyCoverChrome(doc);
+  doc.body.appendChild(root);
+
   const opts = getOledRefresherOpts();
   const durationSec = Math.max(1, opts.durationSec);
   const passes = Math.max(1, opts.passes);
+  let armed = false;
+  let closing = false;
+  let raf = 0;
+  const cleanups: Array<() => void> = [];
 
   const close = () => {
-    if (!armed.current) return;
+    if (!armed || closing) return;
+    closing = true;
     setOledRefresherActive(false);
-    closeModal?.();
+    unmount();
   };
 
-  useEffect(() => {
-    const armTimer = window.setTimeout(() => {
-      armed.current = true;
-    }, 500);
+  const armTimer = win.setTimeout(() => {
+    armed = true;
+  }, ARM_MS);
+  cleanups.push(() => win.clearTimeout(armTimer));
 
-    const wrap = wrapRef.current;
-    const canvas = canvasRef.current;
-    if (!wrap || !canvas) {
-      return () => window.clearTimeout(armTimer);
-    }
+  const releaseComposition = pushOverlayComposition();
 
-    const dpr = Math.max(1, window.devicePixelRatio || 1);
-    const cssW = Math.max(
-      800,
-      wrap.clientWidth || window.innerWidth || window.screen?.width || 1920,
-    );
-    const cssH = Math.max(
-      480,
-      wrap.clientHeight || window.innerHeight || window.screen?.height || 1080,
-    );
-    canvas.width = Math.round(cssW * dpr);
-    canvas.height = Math.round(cssH * dpr);
-    canvas.style.width = `${cssW}px`;
-    canvas.style.height = `${cssH}px`;
+  const cell = CELL_PX;
+  const dpr = win.devicePixelRatio || 1;
+  const cssW = Math.max(1, win.innerWidth || root.clientWidth || win.screen?.width || 1920);
+  const cssH = Math.max(1, win.innerHeight || root.clientHeight || win.screen?.height || 1080);
+  // Steam is 1353×761 CSS at dpr 1.42 → 1920×1080 gamescope. Draw in that
+  // backing store so 3×3 cells are real panel pixels, not 4.26px CSS blobs.
+  const pixelW = Math.max(cell, Math.round((cssW * dpr) / cell) * cell);
+  const pixelH = Math.max(cell, Math.round((cssH * dpr) / cell) * cell);
+  canvas.width = pixelW;
+  canvas.height = pixelH;
 
-    const ctx = canvas.getContext("2d", { alpha: false });
-    if (!ctx) {
-      return () => window.clearTimeout(armTimer);
-    }
-    ctx.imageSmoothingEnabled = false;
-
-    const cell = CELL_PX;
-    const bandH = Math.max(cell * 8, Math.floor(canvas.height / 3 / cell) * cell);
-    const cols = Math.max(1, Math.ceil(canvas.width / cell));
-    const rows = Math.max(1, Math.ceil(bandH / cell));
-    const noise = document.createElement("canvas");
-    const nctx = noise.getContext("2d", { alpha: false });
-    if (!nctx) {
-      return () => window.clearTimeout(armTimer);
-    }
-
+  const ctx = canvas.getContext("2d");
+  const band = doc.createElement("canvas");
+  const bandCtx = band.getContext("2d");
+  if (ctx && bandCtx) {
+    disableSmoothing(ctx);
+    disableSmoothing(bandCtx);
+    const bandH = Math.max(cell * 8, Math.floor(pixelH / 3 / cell) * cell);
+    band.width = pixelW;
+    band.height = bandH;
     const paintNoise = () => {
-      noise.width = cols;
-      noise.height = rows;
-      fillNoise(nctx, cols, rows);
+      disableSmoothing(bandCtx);
+      paintBand(bandCtx, pixelW, bandH, cell);
     };
     paintNoise();
-
     const totalSec = durationSec * passes;
-    const startedAt = performance.now();
+    const startedAt = win.performance.now();
     let lastPass = -1;
-    let raf = 0;
     const loop = (now: number) => {
+      if (closing) return;
       const elapsed = (now - startedAt) / 1000;
       if (elapsed >= totalSec) {
-        armed.current = true;
+        armed = true;
         close();
         return;
       }
@@ -121,118 +161,120 @@ export function OledRefresherModal({ closeModal }: { closeModal?: () => void }) 
         paintNoise();
       }
       const frac = Math.min(1, (elapsed - pass * durationSec) / durationSec);
-      const travel = Math.max(0, canvas.height - bandH);
+      const travel = Math.max(0, pixelH - bandH);
       const y = Math.floor((frac * travel) / cell) * cell;
       ctx.fillStyle = "#000";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(noise, 0, 0, cols, rows, 0, y, cols * cell, rows * cell);
-      if (labelRef.current) {
-        const left = Math.max(0, Math.ceil(totalSec - elapsed));
-        labelRef.current.textContent = AYN_TEXT.replace("%ds", `${left}s`);
-      }
-      raf = window.requestAnimationFrame(loop);
+      ctx.fillRect(0, 0, pixelW, pixelH);
+      disableSmoothing(ctx);
+      ctx.drawImage(band, 0, y);
+      label.textContent = AYN_TEXT.replace("%ds", `${Math.max(0, Math.ceil(totalSec - elapsed))}s`);
+      raf = win.requestAnimationFrame(loop);
     };
-    raf = window.requestAnimationFrame(loop);
+    raf = win.requestAnimationFrame(loop);
+    cleanups.push(() => win.cancelAnimationFrame(raf));
+  }
 
-    const onPointer = () => close();
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key) close();
-    };
-    wrap.addEventListener("pointerdown", onPointer, true);
-    window.addEventListener("keydown", onKey, true);
+  const onPointerDown = (event: PointerEvent) => {
+    eat(event);
+    try {
+      root.setPointerCapture(event.pointerId);
+    } catch {
+      /* ignore */
+    }
+  };
+  const onPointerUp = (event: PointerEvent) => {
+    eat(event);
+    close();
+  };
+  const onClick = (event: Event) => eat(event);
+  const onKey = (event: KeyboardEvent) => {
+    if (!event.key) return;
+    eat(event);
+    close();
+  };
+  root.addEventListener("pointerdown", onPointerDown, true);
+  root.addEventListener("pointerup", onPointerUp, true);
+  root.addEventListener("click", onClick, true);
+  root.addEventListener("touchstart", onClick, { capture: true, passive: false });
+  root.addEventListener("touchend", onPointerUp as EventListener, { capture: true, passive: false });
+  win.addEventListener("keydown", onKey, true);
+  cleanups.push(() => {
+    root.removeEventListener("pointerdown", onPointerDown, true);
+    root.removeEventListener("pointerup", onPointerUp, true);
+    root.removeEventListener("click", onClick, true);
+    root.removeEventListener("touchstart", onClick, true);
+    root.removeEventListener("touchend", onPointerUp as EventListener, true);
+    win.removeEventListener("keydown", onKey, true);
+  });
 
-    let registration: { unregister?: () => void } | undefined;
-    const inputDelay = window.setTimeout(() => {
-      try {
-        registration = window.SteamClient?.Input?.RegisterForControllerStateChanges?.((changes: any[]) => {
-          if (controllerButtonsPressed(changes)) close();
-        });
-      } catch {
-        registration = undefined;
-      }
-    }, 500);
-
-    return () => {
-      window.clearTimeout(armTimer);
-      window.clearTimeout(inputDelay);
-      window.cancelAnimationFrame(raf);
-      wrap.removeEventListener("pointerdown", onPointer, true);
-      window.removeEventListener("keydown", onKey, true);
-      try {
-        registration?.unregister?.();
-      } catch {
-        /* ignore */
-      }
-    };
-  }, [closeModal, durationSec, passes]);
-
-  return (
-    <ModalRoot
-      bAllowFullSize
-      bHideCloseIcon
-      bDisableBackgroundDismiss
-      className="batocera-oled-refresh-modal"
-      modalClassName="batocera-oled-refresh-modal"
-      onCancel={close}
-    >
-      <style>{`
-        .batocera-oled-refresh-modal,
-        .batocera-oled-refresh-modal .DialogContent,
-        .batocera-oled-refresh-modal .GenericDialog,
-        .ModalOverlayContent:has(.batocera-oled-refresh-wrap) {
-          width: 100vw !important;
-          height: 100vh !important;
-          max-width: none !important;
-          max-height: none !important;
-          padding: 0 !important;
-          margin: 0 !important;
-          background: #000 !important;
-          border: 0 !important;
-          box-shadow: none !important;
+  const nav = steamNavManager(win);
+  try {
+    const release = nav?.SetCatchAllGamepadInput?.(() => close());
+    if (typeof release === "function") cleanups.push(release);
+    else if (nav?.SetCatchAllGamepadInput) {
+      cleanups.push(() => {
+        try {
+          nav.SetCatchAllGamepadInput(null);
+        } catch {
+          /* ignore */
         }
-      `}</style>
-      <div
-        ref={wrapRef}
-        className="batocera-oled-refresh-wrap"
-        style={{
-          position: "relative",
-          width: "100vw",
-          height: "100vh",
-          background: "#000",
-          overflow: "hidden",
-          cursor: "none",
-        }}
-      >
-        <canvas
-          ref={canvasRef}
-          style={{
-            position: "absolute",
-            inset: 0,
-            width: "100%",
-            height: "100%",
-            display: "block",
-            imageRendering: "pixelated",
-          }}
-        />
-        <div
-          ref={labelRef}
-          style={{
-            position: "absolute",
-            left: "4%",
-            right: "4%",
-            top: "6%",
-            textAlign: "center",
-            color: "#fff",
-            fontSize: "22px",
-            fontWeight: 600,
-            lineHeight: 1.35,
-            userSelect: "none",
-            pointerEvents: "none",
-            zIndex: 1,
-          }}
-        />
-      </div>
-    </ModalRoot>
-  );
+      });
+    }
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    const registration = steamClient(win)?.Input?.RegisterForControllerStateChanges?.((changes: any[]) => {
+      if (controllerButtonsPressed(changes)) close();
+    });
+    if (registration?.unregister) {
+      cleanups.push(() => {
+        try {
+          registration.unregister();
+        } catch {
+          /* ignore */
+        }
+      });
+    }
+  } catch {
+    /* ignore */
+  }
+
+  const padPoll = win.setInterval(() => {
+    if (!armed || closing) return;
+    try {
+      const pads = win.navigator.getGamepads?.() || [];
+      for (const pad of pads) {
+        if (!pad) continue;
+        if (pad.buttons.some((button) => button.pressed || button.value > 0.35)) {
+          close();
+          return;
+        }
+        if (pad.axes.some((axis) => Math.abs(axis) > 0.45)) {
+          close();
+          return;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }, 80);
+  cleanups.push(() => win.clearInterval(padPoll));
+
+  mounted = {
+    root,
+    win,
+    doc,
+    releaseComposition,
+    stop: () => {
+      for (const fn of cleanups.splice(0)) {
+        try {
+          fn();
+        } catch {
+          /* ignore */
+        }
+      }
+    },
+  };
 }

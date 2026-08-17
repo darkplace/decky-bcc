@@ -108,9 +108,196 @@ function useOledRefresherActive() {
     return value;
 }
 
+/** GamepadUI main window. Plugin `window` is often SharedJSContext (1×1). */
+function steamWindow() {
+    try {
+        const sp = DFL.findSP();
+        if (sp?.document?.documentElement)
+            return sp;
+    }
+    catch {
+        /* ignore */
+    }
+    return window;
+}
+function steamClient(win = steamWindow()) {
+    return win.SteamClient || window.SteamClient;
+}
+function steamNavManager(win = steamWindow()) {
+    return (win.SteamUIStore?.NavigationManager
+        || window.SteamUIStore?.NavigationManager
+        || DFL.getFocusNavController());
+}
+
+/** Same enum MagicBlackDecky / Steam GamepadUI use. */
+var UIComposition;
+(function (UIComposition) {
+    UIComposition[UIComposition["Hidden"] = 0] = "Hidden";
+    UIComposition[UIComposition["Notification"] = 1] = "Notification";
+    UIComposition[UIComposition["Overlay"] = 2] = "Overlay";
+    UIComposition[UIComposition["Opaque"] = 3] = "Opaque";
+    UIComposition[UIComposition["OverlayKeyboard"] = 4] = "OverlayKeyboard";
+    UIComposition[UIComposition["OverlayQAM"] = 5] = "OverlayQAM";
+    UIComposition[UIComposition["OverlayKeyboard1"] = 6] = "OverlayKeyboard1";
+})(UIComposition || (UIComposition = {}));
+function looksLikeHook(value) {
+    if (typeof value !== "function")
+        return false;
+    const source = value.toString();
+    return (source.includes("AddMinimumCompositionStateRequest")
+        && source.includes("ChangeMinimumCompositionStateRequest")
+        && source.includes("RemoveMinimumCompositionStateRequest")
+        && !source.includes("m_mapCompositionStateRequests"));
+}
+function looksLikeApi(value) {
+    return (!!value
+        && typeof value.AddMinimumCompositionStateRequest === "function"
+        && typeof value.RemoveMinimumCompositionStateRequest === "function");
+}
+function findCompositionApi() {
+    try {
+        const exported = DFL.findModuleExport((exp) => looksLikeApi(exp));
+        if (looksLikeApi(exported))
+            return exported;
+    }
+    catch {
+        /* ignore */
+    }
+    try {
+        const child = DFL.findModuleChild((mod) => {
+            if (!mod || typeof mod !== "object")
+                return undefined;
+            for (const key of Object.keys(mod)) {
+                const value = mod[key];
+                if (looksLikeApi(value))
+                    return value;
+            }
+            return undefined;
+        });
+        if (looksLikeApi(child))
+            return child;
+    }
+    catch {
+        /* ignore */
+    }
+    const roots = [steamWindow(), window];
+    for (const win of roots) {
+        const store = win.SteamUIStore;
+        if (looksLikeApi(store))
+            return store;
+        if (store && typeof store === "object") {
+            for (const key of Object.keys(store)) {
+                const value = store[key];
+                if (looksLikeApi(value))
+                    return value;
+            }
+        }
+    }
+    return undefined;
+}
+/** MagicBlack's React hook; no-op if this Steam build does not export it. */
+const useUIComposition = (() => {
+    try {
+        const hook = DFL.findModuleChild((mod) => {
+            if (!mod || typeof mod !== "object")
+                return undefined;
+            for (const key of Object.keys(mod)) {
+                const value = mod[key];
+                if (looksLikeHook(value))
+                    return value;
+            }
+            return undefined;
+        });
+        if (typeof hook === "function")
+            return hook;
+    }
+    catch {
+        /* ignore */
+    }
+    return () => { };
+})();
+const STYLE_ID = "batocera-oled-cover-style";
+const BODY_CLASS = "batocera-oled-cover";
+const COVER_CSS = `
+html.${BODY_CLASS},
+body.${BODY_CLASS} {
+  overflow: hidden !important;
+}
+#batocera-oled-refresh-root {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: auto !important;
+  height: auto !important;
+  z-index: 2147483646 !important;
+  background: #000 !important;
+  pointer-events: auto !important;
+  cursor: none !important;
+}
+#batocera-oled-refresh-root canvas {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  display: block !important;
+  image-rendering: pixelated !important;
+}
+`;
+function applyCoverChrome(doc) {
+    doc.documentElement.classList.add(BODY_CLASS);
+    doc.body?.classList.add(BODY_CLASS);
+    if (!doc.getElementById(STYLE_ID)) {
+        const style = doc.createElement("style");
+        style.id = STYLE_ID;
+        style.textContent = COVER_CSS;
+        doc.head.appendChild(style);
+    }
+}
+function releaseCoverChrome(doc) {
+    doc.documentElement.classList.remove(BODY_CLASS);
+    doc.body?.classList.remove(BODY_CLASS);
+    doc.getElementById(STYLE_ID)?.remove();
+}
+/** Raise GamepadUI to overlay composition so header/footer are not a separate layer. */
+function pushOverlayComposition() {
+    const token = `batocera-oled-${Math.random().toString(36).slice(2)}`;
+    const api = findCompositionApi();
+    try {
+        api?.AddMinimumCompositionStateRequest(token, UIComposition.Overlay);
+    }
+    catch {
+        /* ignore */
+    }
+    const win = steamWindow();
+    try {
+        steamClient(win)?.Window?.SetComposition?.(UIComposition.Overlay, [], 1);
+    }
+    catch {
+        /* ignore */
+    }
+    return () => {
+        try {
+            api?.RemoveMinimumCompositionStateRequest(token);
+        }
+        catch {
+            /* ignore */
+        }
+        try {
+            steamClient(win)?.Window?.SetComposition?.(UIComposition.Opaque, [], 1);
+        }
+        catch {
+            /* ignore */
+        }
+    };
+}
+
 const AYN_TEXT = "Anti-image-retention pixel refresh in progress, tap to exit (%ds)";
-/** Batocera/AYN: each noise grain is a 3×3 framebuffer pixel cell. */
 const CELL_PX = 3;
+const ARM_MS = 450;
+const SHIELD_MS = 480;
+let mounted = null;
 function controllerButtonsPressed$1(changes) {
     return Array.isArray(changes) && changes.some((change) => {
         try {
@@ -122,16 +309,52 @@ function controllerButtonsPressed$1(changes) {
         }
     });
 }
-function fillNoise(ctx, cols, rows) {
-    const image = ctx.createImageData(cols, rows);
-    const data = image.data;
-    for (let i = 0; i < data.length; i += 4) {
-        data[i] = (Math.random() * 256) | 0;
-        data[i + 1] = (Math.random() * 256) | 0;
-        data[i + 2] = (Math.random() * 256) | 0;
-        data[i + 3] = 255;
+function disableSmoothing(ctx) {
+    ctx.imageSmoothingEnabled = false;
+    ctx.webkitImageSmoothingEnabled = false;
+}
+/** Same recipe as the pygame smoke: fill 3×3 rects, then blit 1:1. */
+function paintBand(ctx, width, height, cell) {
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, width, height);
+    const inset = 16;
+    const innerW = width - inset * 2;
+    const innerH = height - inset * 2;
+    if (innerW < cell || innerH < cell)
+        return;
+    const cols = Math.floor(innerW / cell);
+    const rows = Math.floor(innerH / cell);
+    for (let row = 0; row < rows; row++) {
+        const y = inset + row * cell;
+        for (let col = 0; col < cols; col++) {
+            const x = inset + col * cell;
+            ctx.fillStyle = `rgb(${(Math.random() * 256) | 0},${(Math.random() * 256) | 0},${(Math.random() * 256) | 0})`;
+            ctx.fillRect(x, y, cell, cell);
+        }
     }
-    ctx.putImageData(image, 0, 0);
+}
+function eat(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation?.();
+}
+function unmount(immediate = false) {
+    const current = mounted;
+    if (!current)
+        return;
+    current.stop();
+    const finish = () => {
+        if (mounted?.root !== current.root)
+            return;
+        current.releaseComposition();
+        current.root.remove();
+        releaseCoverChrome(current.doc);
+        mounted = null;
+    };
+    if (immediate)
+        finish();
+    else
+        current.win.setTimeout(finish, SHIELD_MS);
 }
 function openOledRefresher(opts) {
     setOledRefresherActive(true, opts);
@@ -141,68 +364,74 @@ function openOledRefresher(opts) {
     catch {
         /* ignore */
     }
-    window.setTimeout(() => {
-        DFL.showModal(SP_JSX.jsx(OledRefresherModal, {}), DFL.findSP() || window, { bHideActionIcons: true });
-    }, 80);
+    window.setTimeout(() => mountOledRefresher(), 80);
 }
-function OledRefresherModal({ closeModal }) {
-    const wrapRef = SP_REACT.useRef(null);
-    const canvasRef = SP_REACT.useRef(null);
-    const labelRef = SP_REACT.useRef(null);
-    const armed = SP_REACT.useRef(false);
+function mountOledRefresher() {
+    if (mounted)
+        unmount(true);
+    const win = steamWindow();
+    const doc = win.document;
+    const root = doc.createElement("div");
+    root.id = "batocera-oled-refresh-root";
+    root.setAttribute("aria-label", AYN_TEXT.replace("%ds", ""));
+    const canvas = doc.createElement("canvas");
+    const label = doc.createElement("div");
+    label.style.cssText = "position:absolute;left:4%;right:4%;top:6%;text-align:center;color:#fff;font-size:22px;font-weight:600;line-height:1.35;user-select:none;pointer-events:none;z-index:1;";
+    root.append(canvas, label);
+    applyCoverChrome(doc);
+    doc.body.appendChild(root);
     const opts = getOledRefresherOpts();
     const durationSec = Math.max(1, opts.durationSec);
     const passes = Math.max(1, opts.passes);
+    let armed = false;
+    let closing = false;
+    let raf = 0;
+    const cleanups = [];
     const close = () => {
-        if (!armed.current)
+        if (!armed || closing)
             return;
+        closing = true;
         setOledRefresherActive(false);
-        closeModal?.();
+        unmount();
     };
-    SP_REACT.useEffect(() => {
-        const armTimer = window.setTimeout(() => {
-            armed.current = true;
-        }, 500);
-        const wrap = wrapRef.current;
-        const canvas = canvasRef.current;
-        if (!wrap || !canvas) {
-            return () => window.clearTimeout(armTimer);
-        }
-        const dpr = Math.max(1, window.devicePixelRatio || 1);
-        const cssW = Math.max(800, wrap.clientWidth || window.innerWidth || window.screen?.width || 1920);
-        const cssH = Math.max(480, wrap.clientHeight || window.innerHeight || window.screen?.height || 1080);
-        canvas.width = Math.round(cssW * dpr);
-        canvas.height = Math.round(cssH * dpr);
-        canvas.style.width = `${cssW}px`;
-        canvas.style.height = `${cssH}px`;
-        const ctx = canvas.getContext("2d", { alpha: false });
-        if (!ctx) {
-            return () => window.clearTimeout(armTimer);
-        }
-        ctx.imageSmoothingEnabled = false;
-        const cell = CELL_PX;
-        const bandH = Math.max(cell * 8, Math.floor(canvas.height / 3 / cell) * cell);
-        const cols = Math.max(1, Math.ceil(canvas.width / cell));
-        const rows = Math.max(1, Math.ceil(bandH / cell));
-        const noise = document.createElement("canvas");
-        const nctx = noise.getContext("2d", { alpha: false });
-        if (!nctx) {
-            return () => window.clearTimeout(armTimer);
-        }
+    const armTimer = win.setTimeout(() => {
+        armed = true;
+    }, ARM_MS);
+    cleanups.push(() => win.clearTimeout(armTimer));
+    const releaseComposition = pushOverlayComposition();
+    const cell = CELL_PX;
+    const dpr = win.devicePixelRatio || 1;
+    const cssW = Math.max(1, win.innerWidth || root.clientWidth || win.screen?.width || 1920);
+    const cssH = Math.max(1, win.innerHeight || root.clientHeight || win.screen?.height || 1080);
+    // Steam is 1353×761 CSS at dpr 1.42 → 1920×1080 gamescope. Draw in that
+    // backing store so 3×3 cells are real panel pixels, not 4.26px CSS blobs.
+    const pixelW = Math.max(cell, Math.round((cssW * dpr) / cell) * cell);
+    const pixelH = Math.max(cell, Math.round((cssH * dpr) / cell) * cell);
+    canvas.width = pixelW;
+    canvas.height = pixelH;
+    const ctx = canvas.getContext("2d");
+    const band = doc.createElement("canvas");
+    const bandCtx = band.getContext("2d");
+    if (ctx && bandCtx) {
+        disableSmoothing(ctx);
+        disableSmoothing(bandCtx);
+        const bandH = Math.max(cell * 8, Math.floor(pixelH / 3 / cell) * cell);
+        band.width = pixelW;
+        band.height = bandH;
         const paintNoise = () => {
-            noise.width = cols;
-            noise.height = rows;
-            fillNoise(nctx, cols, rows);
+            disableSmoothing(bandCtx);
+            paintBand(bandCtx, pixelW, bandH, cell);
         };
         paintNoise();
         const totalSec = durationSec * passes;
-        const startedAt = performance.now();
+        const startedAt = win.performance.now();
         let lastPass = -1;
-        let raf = 0;
         const loop = (now) => {
+            if (closing)
+                return;
             const elapsed = (now - startedAt) / 1000;
             if (elapsed >= totalSec) {
-                armed.current = true;
+                armed = true;
                 close();
                 return;
             }
@@ -212,95 +441,129 @@ function OledRefresherModal({ closeModal }) {
                 paintNoise();
             }
             const frac = Math.min(1, (elapsed - pass * durationSec) / durationSec);
-            const travel = Math.max(0, canvas.height - bandH);
+            const travel = Math.max(0, pixelH - bandH);
             const y = Math.floor((frac * travel) / cell) * cell;
             ctx.fillStyle = "#000";
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.imageSmoothingEnabled = false;
-            ctx.drawImage(noise, 0, 0, cols, rows, 0, y, cols * cell, rows * cell);
-            if (labelRef.current) {
-                const left = Math.max(0, Math.ceil(totalSec - elapsed));
-                labelRef.current.textContent = AYN_TEXT.replace("%ds", `${left}s`);
-            }
-            raf = window.requestAnimationFrame(loop);
+            ctx.fillRect(0, 0, pixelW, pixelH);
+            disableSmoothing(ctx);
+            ctx.drawImage(band, 0, y);
+            label.textContent = AYN_TEXT.replace("%ds", `${Math.max(0, Math.ceil(totalSec - elapsed))}s`);
+            raf = win.requestAnimationFrame(loop);
         };
-        raf = window.requestAnimationFrame(loop);
-        const onPointer = () => close();
-        const onKey = (event) => {
-            if (event.key)
-                close();
-        };
-        wrap.addEventListener("pointerdown", onPointer, true);
-        window.addEventListener("keydown", onKey, true);
-        let registration;
-        const inputDelay = window.setTimeout(() => {
-            try {
-                registration = window.SteamClient?.Input?.RegisterForControllerStateChanges?.((changes) => {
-                    if (controllerButtonsPressed$1(changes))
-                        close();
-                });
-            }
-            catch {
-                registration = undefined;
-            }
-        }, 500);
-        return () => {
-            window.clearTimeout(armTimer);
-            window.clearTimeout(inputDelay);
-            window.cancelAnimationFrame(raf);
-            wrap.removeEventListener("pointerdown", onPointer, true);
-            window.removeEventListener("keydown", onKey, true);
-            try {
-                registration?.unregister?.();
-            }
-            catch {
-                /* ignore */
-            }
-        };
-    }, [closeModal, durationSec, passes]);
-    return (SP_JSX.jsxs(DFL.ModalRoot, { bAllowFullSize: true, bHideCloseIcon: true, bDisableBackgroundDismiss: true, className: "batocera-oled-refresh-modal", modalClassName: "batocera-oled-refresh-modal", onCancel: close, children: [SP_JSX.jsx("style", { children: `
-        .batocera-oled-refresh-modal,
-        .batocera-oled-refresh-modal .DialogContent,
-        .batocera-oled-refresh-modal .GenericDialog,
-        .ModalOverlayContent:has(.batocera-oled-refresh-wrap) {
-          width: 100vw !important;
-          height: 100vh !important;
-          max-width: none !important;
-          max-height: none !important;
-          padding: 0 !important;
-          margin: 0 !important;
-          background: #000 !important;
-          border: 0 !important;
-          box-shadow: none !important;
+        raf = win.requestAnimationFrame(loop);
+        cleanups.push(() => win.cancelAnimationFrame(raf));
+    }
+    const onPointerDown = (event) => {
+        eat(event);
+        try {
+            root.setPointerCapture(event.pointerId);
         }
-      ` }), SP_JSX.jsxs("div", { ref: wrapRef, className: "batocera-oled-refresh-wrap", style: {
-                    position: "relative",
-                    width: "100vw",
-                    height: "100vh",
-                    background: "#000",
-                    overflow: "hidden",
-                    cursor: "none",
-                }, children: [SP_JSX.jsx("canvas", { ref: canvasRef, style: {
-                            position: "absolute",
-                            inset: 0,
-                            width: "100%",
-                            height: "100%",
-                            display: "block",
-                            imageRendering: "pixelated",
-                        } }), SP_JSX.jsx("div", { ref: labelRef, style: {
-                            position: "absolute",
-                            left: "4%",
-                            right: "4%",
-                            top: "6%",
-                            textAlign: "center",
-                            color: "#fff",
-                            fontSize: "22px",
-                            fontWeight: 600,
-                            lineHeight: 1.35,
-                            userSelect: "none",
-                            pointerEvents: "none",
-                            zIndex: 1,
-                        } })] })] }));
+        catch {
+            /* ignore */
+        }
+    };
+    const onPointerUp = (event) => {
+        eat(event);
+        close();
+    };
+    const onClick = (event) => eat(event);
+    const onKey = (event) => {
+        if (!event.key)
+            return;
+        eat(event);
+        close();
+    };
+    root.addEventListener("pointerdown", onPointerDown, true);
+    root.addEventListener("pointerup", onPointerUp, true);
+    root.addEventListener("click", onClick, true);
+    root.addEventListener("touchstart", onClick, { capture: true, passive: false });
+    root.addEventListener("touchend", onPointerUp, { capture: true, passive: false });
+    win.addEventListener("keydown", onKey, true);
+    cleanups.push(() => {
+        root.removeEventListener("pointerdown", onPointerDown, true);
+        root.removeEventListener("pointerup", onPointerUp, true);
+        root.removeEventListener("click", onClick, true);
+        root.removeEventListener("touchstart", onClick, true);
+        root.removeEventListener("touchend", onPointerUp, true);
+        win.removeEventListener("keydown", onKey, true);
+    });
+    const nav = steamNavManager(win);
+    try {
+        const release = nav?.SetCatchAllGamepadInput?.(() => close());
+        if (typeof release === "function")
+            cleanups.push(release);
+        else if (nav?.SetCatchAllGamepadInput) {
+            cleanups.push(() => {
+                try {
+                    nav.SetCatchAllGamepadInput(null);
+                }
+                catch {
+                    /* ignore */
+                }
+            });
+        }
+    }
+    catch {
+        /* ignore */
+    }
+    try {
+        const registration = steamClient(win)?.Input?.RegisterForControllerStateChanges?.((changes) => {
+            if (controllerButtonsPressed$1(changes))
+                close();
+        });
+        if (registration?.unregister) {
+            cleanups.push(() => {
+                try {
+                    registration.unregister();
+                }
+                catch {
+                    /* ignore */
+                }
+            });
+        }
+    }
+    catch {
+        /* ignore */
+    }
+    const padPoll = win.setInterval(() => {
+        if (!armed || closing)
+            return;
+        try {
+            const pads = win.navigator.getGamepads?.() || [];
+            for (const pad of pads) {
+                if (!pad)
+                    continue;
+                if (pad.buttons.some((button) => button.pressed || button.value > 0.35)) {
+                    close();
+                    return;
+                }
+                if (pad.axes.some((axis) => Math.abs(axis) > 0.45)) {
+                    close();
+                    return;
+                }
+            }
+        }
+        catch {
+            /* ignore */
+        }
+    }, 80);
+    cleanups.push(() => win.clearInterval(padPoll));
+    mounted = {
+        root,
+        win,
+        doc,
+        releaseComposition,
+        stop: () => {
+            for (const fn of cleanups.splice(0)) {
+                try {
+                    fn();
+                }
+                catch {
+                    /* ignore */
+                }
+            }
+        },
+    };
 }
 
 let active = false;
@@ -336,20 +599,9 @@ function controllerButtonsPressed(changes) {
         }
     });
 }
-function OledScreensaverOverlay() {
-    const active = useOledScreensaverActive();
-    const [clock, setClock] = SP_REACT.useState("");
+function OledScreensaverSurface({ clock }) {
+    useUIComposition(UIComposition.Overlay);
     SP_REACT.useEffect(() => {
-        if (!active)
-            return;
-        const update = () => setClock(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
-        update();
-        const timer = window.setInterval(update, 30000);
-        return () => window.clearInterval(timer);
-    }, [active]);
-    SP_REACT.useEffect(() => {
-        if (!active)
-            return;
         const exit = () => setOledScreensaverActive(false);
         const onKey = (event) => {
             if (event.key)
@@ -364,7 +616,9 @@ function OledScreensaverOverlay() {
                         exit();
                 });
             }
-            catch (error) { }
+            catch {
+                registration = undefined;
+            }
         }, 500);
         return () => {
             window.clearTimeout(delay);
@@ -372,11 +626,11 @@ function OledScreensaverOverlay() {
             try {
                 registration?.unregister?.();
             }
-            catch (error) { }
+            catch {
+                /* ignore */
+            }
         };
-    }, [active]);
-    if (!active)
-        return null;
+    }, []);
     return (SP_JSX.jsxs("div", { "aria-label": "OLED screensaver; press any controller button or touch to exit", onPointerDown: () => setOledScreensaverActive(false), style: {
             position: "fixed",
             inset: 0,
@@ -415,6 +669,21 @@ function OledScreensaverOverlay() {
           letter-spacing: 0.12em;
         }
       ` }), SP_JSX.jsxs("div", { className: "batocera-control-oled-mark", children: ["BATOCERA", SP_JSX.jsx("span", { className: "batocera-control-oled-clock", children: clock })] })] }));
+}
+function OledScreensaverOverlay() {
+    const active = useOledScreensaverActive();
+    const [clock, setClock] = SP_REACT.useState("");
+    SP_REACT.useEffect(() => {
+        if (!active)
+            return;
+        const update = () => setClock(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+        update();
+        const timer = window.setInterval(update, 30000);
+        return () => window.clearInterval(timer);
+    }, [active]);
+    if (!active)
+        return null;
+    return SP_JSX.jsx(OledScreensaverSurface, { clock: clock });
 }
 
 function useDebouncedSave(options) {
@@ -456,7 +725,7 @@ function useDebouncedSave(options) {
 }
 
 function Icon({ path }) {
-    return (SP_JSX.jsx("svg", { style: { display: "block" }, width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", children: path }));
+    return (SP_JSX.jsx("svg", { style: { display: "block" }, width: "20", height: "20", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", children: path }));
 }
 const tabIcons = {
     LSFG: (SP_JSX.jsx(Icon, { path: SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx("rect", { x: "3", y: "5", width: "13", height: "10", rx: "2" }), SP_JSX.jsx("rect", { x: "8", y: "9", width: "13", height: "10", rx: "2" }), SP_JSX.jsx("path", { d: "m12 12 2 2 3-4" })] }) })),
@@ -535,7 +804,6 @@ const styles = `
         box-shadow: none;
         backdrop-filter: none;
       }
-      /* Trial: hint that the icon tab row scrolls. Revert this block + 16px icons if it feels worse. */
       .armada-control-tabs > div > div:first-child::after {
         content: "";
         position: absolute;
@@ -546,15 +814,6 @@ const styles = `
         pointer-events: none;
         z-index: 2;
         background: linear-gradient(to right, rgba(13, 20, 28, 0), #0D141C 88%);
-      }
-      .armada-control-tabs [role="tab"] {
-        min-width: 0 !important;
-        padding-left: 10px !important;
-        padding-right: 10px !important;
-      }
-      .armada-control-tabs [role="tab"] svg {
-        width: 16px;
-        height: 16px;
       }
       .armada-control-tabs [role="tabpanel"] {
         padding-left: 0 !important;
@@ -2068,6 +2327,7 @@ let cfg = {
 let lastActivity = performance.now();
 let cooldownUntil = 0;
 let overlayWasActive = false;
+let lastPadSig = "";
 function updateOledIdleConfig(next) {
     cfg = { ...cfg, ...next };
     bumpActivity();
@@ -2081,7 +2341,7 @@ function bumpActivity(persist = false) {
     if (!persist)
         return;
     const now = performance.now();
-    if (now - lastNote < 500)
+    if (now - lastNote < 400)
         return;
     lastNote = now;
     void noteOledActivity().catch(() => { });
@@ -2107,33 +2367,64 @@ function maybeStart() {
         return;
     if (performance.now() < cooldownUntil)
         return;
+    if ((performance.now() - lastActivity) / 1000 < timeoutSec())
+        return;
     armCooldown();
     openOledRefresher({
         durationSec: cfg.REFRESHER_DURATION,
         passes: cfg.REFRESHER_PASSES,
     });
 }
-function bindSteamInput() {
-    const input = window.SteamClient?.Input;
-    if (!input)
-        return () => { };
+function padSignature(win) {
+    try {
+        const pads = win.navigator.getGamepads?.() || [];
+        const parts = [];
+        for (const pad of pads) {
+            if (!pad)
+                continue;
+            const buttons = pad.buttons.map((button) => (button.pressed || button.value > 0.2 ? 1 : 0)).join("");
+            const axes = pad.axes.map((axis) => Math.round(axis * 8)).join(",");
+            parts.push(`${pad.index}:${buttons}:${axes}`);
+        }
+        return parts.join("|");
+    }
+    catch {
+        return "";
+    }
+}
+function bindSteamInput(win) {
+    const input = steamClient(win)?.Input;
     const regs = [];
-    const onActivity = () => bumpActivity();
-    try {
-        const digital = input.RegisterForControllerInputMessages?.(onActivity);
-        if (digital)
-            regs.push(digital);
-    }
-    catch {
-        /* ignore */
-    }
-    try {
-        const analog = input.RegisterForControllerAnalogInputMessages?.(onActivity);
-        if (analog)
-            regs.push(analog);
-    }
-    catch {
-        /* ignore */
+    const onActivity = () => bumpActivity(true);
+    if (input) {
+        try {
+            const digital = input.RegisterForControllerInputMessages?.(onActivity);
+            if (digital)
+                regs.push(digital);
+        }
+        catch {
+            /* ignore */
+        }
+        try {
+            const analog = input.RegisterForControllerAnalogInputMessages?.(onActivity);
+            if (analog)
+                regs.push(analog);
+        }
+        catch {
+            /* ignore */
+        }
+        try {
+            const state = input.RegisterForControllerStateChanges?.((changes) => {
+                if (!Array.isArray(changes) || !changes.length)
+                    return;
+                onActivity();
+            });
+            if (state)
+                regs.push(state);
+        }
+        catch {
+            /* ignore */
+        }
     }
     return () => {
         for (const reg of regs) {
@@ -2146,17 +2437,36 @@ function bindSteamInput() {
         }
     };
 }
+function bindWindow(win, onDom, block) {
+    const domTypes = ["pointerdown", "touchstart", "keydown", "mousedown"];
+    const blockTypes = ["click", "pointerup", "pointerdown", "touchstart", "mousedown"];
+    for (const type of domTypes)
+        win.addEventListener(type, onDom, true);
+    for (const type of blockTypes)
+        win.addEventListener(type, block, true);
+    const unbindSteam = bindSteamInput(win);
+    return () => {
+        unbindSteam();
+        for (const type of domTypes)
+            win.removeEventListener(type, onDom, true);
+        for (const type of blockTypes)
+            win.removeEventListener(type, block, true);
+    };
+}
 function startOledIdleWatch() {
     bumpActivity();
     armCooldown();
     const onDom = () => bumpActivity(true);
-    const domTypes = ["pointerdown", "touchstart", "keydown", "mousedown"];
-    for (const type of domTypes)
-        window.addEventListener(type, onDom, true);
-    const blockTypes = ["click", "pointerup", "pointerdown", "touchstart", "mousedown"];
-    for (const type of blockTypes)
-        window.addEventListener(type, eatIfBlocking, true);
-    const unbindSteam = bindSteamInput();
+    const unbindPlugin = bindWindow(window, onDom, eatIfBlocking);
+    let unbindSteamWin = () => { };
+    try {
+        const host = steamWindow();
+        if (host !== window)
+            unbindSteamWin = bindWindow(host, onDom, eatIfBlocking);
+    }
+    catch {
+        unbindSteamWin = () => { };
+    }
     const tick = window.setInterval(() => {
         const active = getOledRefresherActive();
         if (active) {
@@ -2168,6 +2478,15 @@ function startOledIdleWatch() {
             overlayWasActive = false;
             armCooldown();
             return;
+        }
+        const host = steamWindow();
+        const sig = padSignature(host);
+        if (sig && sig !== lastPadSig) {
+            lastPadSig = sig;
+            bumpActivity(true);
+        }
+        else if (!lastPadSig) {
+            lastPadSig = sig;
         }
         void getOledIdle()
             .then((state) => {
@@ -2186,6 +2505,9 @@ function startOledIdleWatch() {
             if (performance.now() < cooldownUntil)
                 return;
             const timeout = timeoutSec();
+            const localIdle = (performance.now() - lastActivity) / 1000;
+            if (localIdle < timeout)
+                return;
             if (state?.watching) {
                 if (state.idleSeconds < 2) {
                     bumpActivity();
@@ -2195,9 +2517,7 @@ function startOledIdleWatch() {
                     maybeStart();
                 return;
             }
-            const localIdle = (performance.now() - lastActivity) / 1000;
-            if (localIdle >= timeout)
-                maybeStart();
+            maybeStart();
         })
             .catch(() => {
             if (performance.now() < cooldownUntil)
@@ -2205,14 +2525,11 @@ function startOledIdleWatch() {
             if ((performance.now() - lastActivity) / 1000 >= timeoutSec())
                 maybeStart();
         });
-    }, 1000);
+    }, 250);
     return () => {
         window.clearInterval(tick);
-        unbindSteam();
-        for (const type of domTypes)
-            window.removeEventListener(type, onDom, true);
-        for (const type of blockTypes)
-            window.removeEventListener(type, eatIfBlocking, true);
+        unbindPlugin();
+        unbindSteamWin();
     };
 }
 

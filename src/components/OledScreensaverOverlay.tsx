@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { setOledScreensaverActive, useOledScreensaverActive } from "../lib/oledScreensaver";
+import { UIComposition, useUIComposition } from "../lib/uiComposition";
 
 function controllerButtonsPressed(changes: any[]) {
   return Array.isArray(changes) && changes.some((change) => {
@@ -11,42 +12,37 @@ function controllerButtonsPressed(changes: any[]) {
   });
 }
 
-export function OledScreensaverOverlay() {
-  const active = useOledScreensaverActive();
-  const [clock, setClock] = useState("");
+function OledScreensaverSurface({ clock }: { clock: string }) {
+  useUIComposition(UIComposition.Overlay);
 
   useEffect(() => {
-    if (!active) return;
-    const update = () => setClock(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
-    update();
-    const timer = window.setInterval(update, 30000);
-    return () => window.clearInterval(timer);
-  }, [active]);
-
-  useEffect(() => {
-    if (!active) return;
     const exit = () => setOledScreensaverActive(false);
     const onKey = (event: KeyboardEvent) => {
       if (event.key) exit();
     };
     window.addEventListener("keydown", onKey, true);
 
-    let registration: any;
+    let registration: { unregister?: () => void } | undefined;
     const delay = window.setTimeout(() => {
       try {
         registration = window.SteamClient?.Input?.RegisterForControllerStateChanges?.((changes: any[]) => {
           if (controllerButtonsPressed(changes)) exit();
         });
-      } catch (error) {}
+      } catch {
+        registration = undefined;
+      }
     }, 500);
     return () => {
       window.clearTimeout(delay);
       window.removeEventListener("keydown", onKey, true);
-      try { registration?.unregister?.(); } catch (error) {}
+      try {
+        registration?.unregister?.();
+      } catch {
+        /* ignore */
+      }
     };
-  }, [active]);
+  }, []);
 
-  if (!active) return null;
   return (
     <div
       aria-label="OLED screensaver; press any controller button or touch to exit"
@@ -97,4 +93,20 @@ export function OledScreensaverOverlay() {
       </div>
     </div>
   );
+}
+
+export function OledScreensaverOverlay() {
+  const active = useOledScreensaverActive();
+  const [clock, setClock] = useState("");
+
+  useEffect(() => {
+    if (!active) return;
+    const update = () => setClock(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+    update();
+    const timer = window.setInterval(update, 30000);
+    return () => window.clearInterval(timer);
+  }, [active]);
+
+  if (!active) return null;
+  return <OledScreensaverSurface clock={clock} />;
 }

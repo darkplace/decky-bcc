@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.27 - 2026-08-17
+
+- OLED pixel refresher covers the full Steam GamepadUI panel (header/footer
+  included) via Steam overlay composition, same path MagicBlack uses.
+- Draw the AYN 3×3 noise band in the physical 1920×1080 backing store. Steam
+  CSS is 1353×761 at dpr 1.42 on Odin 3; painting in CSS pixels left the lower
+  half blank and turned cells into extra stripes.
+- Controller buttons dismiss the refresher and count as activity (Steam Input
+  on the main window). Touch no longer click-throughs into Steam on exit.
+- Restore tab icons to 20px; keep the right-edge fade.
+
 ## 0.2.22 - 2026-08-17
 
 - Credit **Xtreme976** for the Fan curve editor
