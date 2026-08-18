@@ -2,8 +2,8 @@ import { DialogButton, Field, Navigation, PanelSection } from "@decky/ui";
 import { useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { restartOledCare, saveOledCare } from "../backend";
-import { openOledRefresher } from "../components/OledRefresherOverlay";
 import { Hint, SliderEdit, ToggleRow } from "../components/widgets";
+import { openOledRefresher } from "../components/OledRefresherOverlay";
 import { useOledRefresherActive } from "../lib/oledRefresher";
 import { setOledScreensaverActive, useOledScreensaverActive } from "../lib/oledScreensaver";
 import { updateOledIdleConfig } from "../lib/oledIdleWatch";
@@ -110,7 +110,7 @@ export function OledCare({ config, setConfig }: {
           label="Anti-image-retention"
           description={
             oled?.stockCli
-              ? "Synced with EmulationStation via display.oledcare* in batocera.conf."
+              ? "Synced with EmulationStation via display.oledcare* in batocera.conf. In Steam the overlay still runs here."
               : "Settings sync to batocera.conf; the host watcher ships in the next image."
           }
         />

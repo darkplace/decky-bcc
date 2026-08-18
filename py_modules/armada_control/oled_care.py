@@ -22,7 +22,9 @@ CARE_BIN = Path("/usr/bin/batocera-oled-care")
 REFRESHER_BIN = Path("/usr/bin/batocera-oled-refresher")
 STATE_DIR = Path("/var/run/batocera-oled-care")
 NATIVE_PYTHON = Path("/usr/bin/python3")
-IDLE_HELPER = Path(__file__).resolve().parent / "oled_idle_helper.py"
+IDLE_HELPER = Path("/usr/bin/batocera-oled-idle-helper")
+if not IDLE_HELPER.is_file():
+    IDLE_HELPER = Path(__file__).resolve().parent / "oled_idle_helper.py"
 IDLE_HELPER_PID = STATE_DIR / "idle-helper.pid"
 CONFIG_PATH = Path("/userdata/system/configs/odin-oled-care/settings.conf")
 BACKLIGHT = Path("/sys/class/backlight/ae94000.dsi.0")
@@ -265,6 +267,14 @@ def ensure_idle_watch(enabled: bool) -> None:
     IDLE_HELPER_PID.write_text(str(proc.pid), encoding="utf-8")
 
 
+def ensure_decky_idle_watch(enabled: bool) -> None:
+    """Decky-only fallback when batocera-oled-care is not on the image."""
+    if stock_cli_available():
+        stop_idle_watch()
+        return
+    ensure_idle_watch(enabled)
+
+
 def _phase() -> str:
     state = STATE_DIR / "state"
     if not state.exists():
@@ -283,7 +293,8 @@ def _phase() -> str:
 def get_state() -> dict:
     with _LOCK:
         cfg = _parse_conf()
-        ensure_idle_watch(cfg["ENABLED"] == 1)
+        ensure_decky_idle_watch(cfg["ENABLED"] == 1)
+    watching = _service_running() if stock_cli_available() else bool(_helper_pid())
     return {
         "supported": supported(),
         "panelDetected": panel_detected(),
@@ -293,8 +304,8 @@ def get_state() -> dict:
         "config": cfg,
         "labels": KEY_LABELS,
         "runtime": {
-            "serviceRunning": bool(_helper_pid()) or _service_running(),
-            "monitorRunning": bool(_helper_pid()) or _service_running(),
+            "serviceRunning": watching,
+            "monitorRunning": watching,
             "idleSeconds": _idle_seconds(),
             "phase": _phase(),
             "brightnessPct": None,
@@ -312,7 +323,7 @@ def save_state(data: dict) -> dict:
         merged["DETECT"] = 1 if merged["ENABLED"] else 0
         _write_local_conf(merged)
         _apply_to_batocera(merged)
-        ensure_idle_watch(merged["ENABLED"] == 1)
+        ensure_decky_idle_watch(merged["ENABLED"] == 1)
         if stock_cli_available():
             if merged["ENABLED"]:
                 _run(["batocera-services", "enable", "oledcare"])
@@ -331,11 +342,13 @@ def note_activity() -> None:
 def idle_snapshot() -> dict:
     with _LOCK:
         cfg = _parse_conf()
-        ensure_idle_watch(cfg["ENABLED"] == 1)
-        watching = bool(_helper_pid())
+        ensure_decky_idle_watch(cfg["ENABLED"] == 1)
+    # GamepadUI cannot show the host pygame refresher. Always let the Decky
+    # overlay use its own Steam idle clock; batocera-oled-care still runs
+    # for ES / emulators outside Steam.
     return {
-        "idleSeconds": _idle_seconds() if watching else 0,
-        "watching": watching,
+        "idleSeconds": 0,
+        "watching": False,
         "enabled": cfg["ENABLED"] == 1,
         "refresher": cfg["REFRESHER"] == 1,
         "timeout": int(cfg["STATIC_TIMEOUT"]),

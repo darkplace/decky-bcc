@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.29 - 2026-08-19
+
+- Steam QAM always shows the AYN pixel refresher (Run + idle overlay), even when
+  `batocera-oled-care` is on the image. Host pygame cannot paint over GamepadUI;
+  the Decky overlay uses its own idle clock again (same path as 0.2.27).
+  Host daemon remains for ES/emulators.
+
 ## 0.2.28 - 2026-08-18
 
 - M1/M2 **On-screen keyboard** paddle action calls `/usr/bin/onscreen-keyboard toggle`
